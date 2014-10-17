@@ -6,7 +6,7 @@
  */
 
 #include "FITS.h"
-#include "cfitsio/fitsio.h"
+#include "fitsio.h"
 #include "CustomException.h"
 
 //Known bug.!: When reading an image some flawed pixel are added around, so the image needs to be cropped afterwards in order to avoid them
