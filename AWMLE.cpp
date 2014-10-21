@@ -21,38 +21,55 @@
 
 void AWMLE(const cv::Mat& img, const cv::Mat& psf, cv::Mat& object, const double& sigmaNoise, const unsigned int& total_planes)
 {
+  //Declare variables to use later
   std::vector<cv::Mat> w_img, w_fimg, w_projection;
   cv::Mat wr_img, wr_fimg, wr_projection;
   std::vector<double> noiseSigmaWavelet;
-  //simulate noise propagation through wavelets
+
+  //simulate noise propagation through wavelets, and calculate sigma noise at each wavelet plane
   waveletNoise(sigmaNoise, total_planes, img.size(), noiseSigmaWavelet);
 
-  //split up image into its wavelet planes
+  //split up image data into its wavelet planes
   udwd(img, w_img, wr_img, total_planes);
 
   //Estimation of the Poisson noise
   cv::Mat poissonNoise;
   cv::sqrt(wr_img + std::pow(sigmaNoise,2), poissonNoise);
+
+  //Declare more variables
   cv::Mat projection, psf_normalized;
-  //make sure psf is normalized, and the total engery is one
+
+  //make sure psf is normalized, and the total engery is one, divide psf by the total(psf)
   cv::divide(psf, cv::sum(psf), psf_normalized);
+
   std::cout << "psf.normalized.at(40,40): " << psf_normalized.at<double>(40,40) << std::endl;
-  object = cv::Mat::ones(img.size(), img.type());   //object initialization
+  object = cv::Mat::ones(img.size(), img.type());   //object initialization to ones
+
+  //Declare some variables and consts
   double likelihood(0.0);
-  double convergence = std::numeric_limits<float>::epsilon();  //difference between one float and the following
+  const double convergence = std::numeric_limits<float>::epsilon();  //difference between one float and the following
+
+  //Initialize iteration process control variables
   double fx_new = std::numeric_limits<float>::max()/10.0;  //A very big number
   double fx_old(0.0);
+
+  //inital total energy, this amount must remain constant through the whole process
   cv::Scalar energy = cv::sum(img);
   std::cout << "energy=" << energy.val[0] << std::endl;
+
+  //Start the iteration process, until some condition is reached
   for(unsigned int i(0); i<100; ++i)
   {
+    //Get direct projection: from true object space to image data space through psf
     conv_flaw(object, psf_normalized, projection);
     cv::Mat fimg; //filtered image
-    calculpprima(img, projection, sigmaNoise, fimg, likelihood);  //filtered image
+    calculpprima(img, projection, sigmaNoise, fimg, likelihood);  //filtered image, replacement to the original data set
 
+    //Update iteration process control variables
     fx_old = fx_new;
     fx_new = likelihood;
 
+    //Decompose into wavelets plnes both, filtered image and direct projection image
     udwd(fimg, w_fimg, wr_fimg, total_planes);   //filtered image wavelet decomposition
     udwd(projection, w_projection, wr_projection, total_planes);    //projection wavelet decomposition
 
