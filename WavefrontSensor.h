@@ -11,7 +11,7 @@
 #include <vector>
 #include "opencv2/opencv.hpp"
 
-#include "ErrorMetric.h"
+//#include "ErrorMetric.h"
 //member elements: number of iterations, zernike used in the process...
 
 class WavefrontSensor
@@ -21,21 +21,17 @@ public:
   virtual ~WavefrontSensor();
   void createModifiedHanningWindow(cv::Mat& modifiedHanningWindow,
       const int& sideLength, const double& apodizedAreaPercent, int datatype);
-  cv::Mat WavefrontSensing(const cv::Mat& d0, const cv::Mat& dk, const double& meanPowerNoiseD0, const double& meanPowerNoiseDk);
+  cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise);
 private:
-  void showRestore(ErrorMetric errMet, cv::Mat& fm);
-  cv::Mat backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI);
-  unsigned int imageCoreSize_;
+  //void showRestore(ErrorMetric errMet, cv::Mat& fm);
 
-  double dcRMS_Minimum_;
-  double lmIncrement_Minimum_;
   unsigned int maximumIterations_;
   cv::Mat c_InitialValues;    //Initial values for zernike coefficients, they are zero by default
 
   cv::Mat cMinimum_;
   double lmMinimum_;
   unsigned int iterationMinimum_;
-  double diversityFactor_;
+  std::vector<double> diversityFactor_;
   //cv::Mat zernikesInUse_;
 
 };

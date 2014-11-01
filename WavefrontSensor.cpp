@@ -6,18 +6,19 @@
  */
 
 #include "WavefrontSensor.h"
-#include "CustomException.h"
+//#include "CustomException.h"
 #include "Zernikes.h"
 #include "Zernikes.cpp"
 #include <cmath>
-#include "NoiseEstimator.h"
-#include "WaveletTransform.h"
+//#include "NoiseEstimator.h"
+//#include "WaveletTransform.h"
 #include "PDTools.h"
-#include "Optimization.h"
-#include "OpticalSystem.h"
-#include "ErrorMetric.h"
+//#include "Optimization.h"
+//#include "OpticalSystem.h"
+//#include "ErrorMetric.h"
+#include "GetStep.h"
 #include "TelescopeSettings.h"
-#include "MonitorLog.h"
+//#include "MonitorLog.h"
 
 constexpr double PI = 2*acos(0.0);
 
@@ -25,11 +26,8 @@ constexpr double PI = 2*acos(0.0);
 
 WavefrontSensor::WavefrontSensor()
 {
-  dcRMS_Minimum_ = 1.0e-2;
-  lmIncrement_Minimum_ = 0.0;
   maximumIterations_ = 50;
-  imageCoreSize_ = 70;
-  diversityFactor_ = -2.21209;
+  diversityFactor_ = {0.0, -2.21209};
   lmMinimum_ = 100;
   iterationMinimum_ = 1;
 }
@@ -41,17 +39,21 @@ WavefrontSensor::~WavefrontSensor()
 
 
 cv::Mat
-WavefrontSensor::WavefrontSensing(const cv::Mat& d0, const cv::Mat& dk, const double& meanPowerNoiseD0, const double& meanPowerNoiseDk)
+WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise)
 {
-  if (d0.cols != dk.cols || d0.rows != dk.rows || d0.rows != d0.cols)
+  cv::Size d_size = d.front().size();
+  for(cv::Mat di : d)
   {
-    throw CustomException("Images focused and defocused must be iqual size");
+    if (d_size != di.size())
+    {
+      std::cout << "Input dataset images must be iqual size" << std::endl;
+      //throw CustomException("Input dataset images must be iqual size");
+    }
   }
 
-  double filterTuning_ = 1.0;
-  unsigned long imgSize = d0.cols;
-  TelescopeSettings tsettings(imgSize);
-  MonitorLog monitorLog;
+  //unsigned long imgSize = d_size.width;
+  TelescopeSettings tsettings(d_size.width);
+  //MonitorLog monitorLog;
   unsigned int numberOfNonSingularities(0);
   double singularityThresholdOverMaximum(0.0);
 
@@ -68,37 +70,64 @@ WavefrontSensor::WavefrontSensing(const cv::Mat& d0, const cv::Mat& dk, const do
   alignmentSetup.at<bool>(0,1) = true;
   alignmentSetup.at<bool>(0,2) = true;
 
-  unsigned int pupilSideLength = optimumSideLength(imgSize/2, tsettings.pupilRadiousPixels());
+  unsigned int pupilSideLength = optimumSideLength(d_size.width/2, tsettings.pupilRadiousPixels());
   std::cout << "pupilSideLength: " << pupilSideLength << std::endl;
   std::map<unsigned int, cv::Mat> zernikeCatalog = Zernikes<double>::buildCatalog(c.total(), pupilSideLength, tsettings.pupilRadiousPixels());
 
-  std::cout << "Total original image energy: " << cv::sum(d0) << std::endl;
+  std::cout << "Total original image energy: " << cv::sum(d.front()) << std::endl;
 
-  cv::Mat D0, Dk;
-  cv::dft(d0, D0, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  shift(D0, D0, D0.cols/2, D0.rows/2);
-  cv::dft(dk, Dk, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  shift(Dk, Dk, Dk.cols/2, Dk.rows/2);
+  std::vector<cv::Mat> D;
+  for(cv::Mat di : d)
+  {
+    cv::Mat Di;
+    cv::dft(di, Di, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+    shift(Di, Di, Di.cols/2, Di.rows/2);
+    D.push_back(Di);
+  }
 
-  double c4 = diversityFactor_ * PI/(2.0*std::sqrt(3.0));
-  std::cout << "c4: " << c4 << std::endl;
   cv::Mat z4 = Zernikes<double>::phaseMapZernike(4, pupilSideLength, tsettings.pupilRadiousPixels());
   double z4AtOrigen = Zernikes<double>::pointZernike(4, 0, 0);
-  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
-  cv::Mat focusedPupilPhase, defocusedPupilPhase;
+  std::vector<cv::Mat> diversityPhase;
+  for(double dfactor : diversityFactor_)
+  {
+    //defocus zernike coefficient: c4 = dfactor * PI/(2.0*std::sqrt(3.0))
+	diversityPhase.push_back( (dfactor * PI/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen));
+  }
+  double pupilRadiousP = tsettings.pupilRadiousPixels();
+  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, pupilRadiousP);
+
+  //cv::Mat offsetPupilPhase, defocusedPupilPhase;
   double lmPrevious(0.0);
   //iterate through this loop until stable solution of zernike coefficients is found
   for (unsigned int iteration = 0; iteration < maximumIterations_; ++iteration)
   {
-    focusedPupilPhase = Zernikes<double>::phaseMapZernikeSum(pupilSideLength, tsettings.pupilRadiousPixels(), c.setTo(0, 1-zernikesInUse ));
-    defocusedPupilPhase = focusedPupilPhase + c4*(z4-z4AtOrigen);
+	std::cout << "iteration: " << iteration << std::endl;
+
+    int ret = getstep(c, D, diversityPhase, pupilAmplitude, pupilSideLength, zernikesInUse, alignmentSetup, zernikeCatalog,
+    		             pupilRadiousP, meanPowerNoise, lmPrevious,
+    numberOfNonSingularities, singularityThresholdOverMaximum, dc);
+/*
+    cv::Mat offsetPupilPhase = Zernikes<double>::phaseMapZernikeSum(pupilSideLength,
+    		pupilRadiousP, c.setTo(0, 1-zernikesInUse ));
+
+
+    std::vector<cv::Mat> pupilPhase;
+    for(cv::Mat diversityPhase_i : diversityPhase)
+    {
+      pupilPhase.push_back(offsetPupilPhase + diversityPhase_i);
+    }
     // + c2  * Zernikes<double>::phaseMapZernike(2, imgSize/2, tsettings.pupilRadiousPixels())   //tiptilt X
     // + c3  * Zernikes<double>::phaseMapZernike(3, imgSize/2, tsettings.pupilRadiousPixels())   //tiptilt Y
 
-    OpticalSystem focusedOS(focusedPupilPhase, pupilAmplitude);
-    OpticalSystem defocusedOS(defocusedPupilPhase, pupilAmplitude);
+    std::vector<OpticalSystem> os;
+    for(cv::Mat pupilPhase_i : pupilPhase)
+    {
+      os.push_back(OpticalSystem(pupilPhase_i, pupilAmplitude));
+    }
 
-    ErrorMetric EM(focusedOS, defocusedOS, D0, Dk, meanPowerNoiseD0*filterTuning_, meanPowerNoiseDk*filterTuning_, zernikeCatalog, zernikesInUse);
+    double filterTuning_ = 1.0;
+    unsigned int imageCoreSize_ = 70;
+    ErrorMetric EM(os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse);
     cv::Mat fm;
     //showRestore(EM, fm);
     std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;
@@ -121,6 +150,9 @@ WavefrontSensor::WavefrontSensing(const cv::Mat& d0, const cv::Mat& dk, const do
 
     lmPrevious = lmCurrent;
 
+    double dcRMS_Minimum_ = 1.0e-2;
+    double lmIncrement_Minimum_ = 0.0;
+
     if((dcRMS < dcRMS_Minimum_) || (lmIncrement < lmIncrement_Minimum_))
     {
       if(dcRMS < dcRMS_Minimum_) std::cout << "dcRMS_Minimum has been reached." << std::endl;
@@ -137,30 +169,21 @@ WavefrontSensor::WavefrontSensing(const cv::Mat& d0, const cv::Mat& dk, const do
     singularityThresholdOverMaximum = optimumIncrement.singularityThresholdOverMaximum();
 
     dc = optimumIncrement.dC();
+    */
     //very importan!! why do here have to substract instead of add?? what did I do wrong before?
-    c = c - dc;
-
+    if(!ret)
+    {
+      c = c - dc;
+    }
+    else
+    {
+      break;
+    }
   }
 
-  return focusedPupilPhase;
+  return c;
 }
-
-cv::Mat WavefrontSensor::backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI)
-{
-  cv::Mat imageMatrixROIZeroMean;
-  if(!fourierSpaceMatrix.empty())
-  {
-    cv::Mat imageMatrix;
-    cv::Mat fourierSpaceMatrixShift(fourierSpaceMatrix);
-    //shift quadrants back to origin in the corner, inverse transform, take central region, force zero-mean
-    shift(fourierSpaceMatrixShift, fourierSpaceMatrixShift, fourierSpaceMatrixShift.cols/2, fourierSpaceMatrixShift.rows/2);
-    cv::idft(fourierSpaceMatrixShift, imageMatrix, cv::DFT_REAL_OUTPUT);
-    cv::Mat imageMatrixROI = takeoutImageCore(imageMatrix, centralROI.height);
-    imageMatrixROIZeroMean = imageMatrixROI - cv::mean(imageMatrixROI);
-  }
-  return imageMatrixROIZeroMean;
-}
-
+/*
 void WavefrontSensor::showRestore(ErrorMetric errMet, cv::Mat& fm)
 {
   cv::Mat FMH;
@@ -172,3 +195,4 @@ void WavefrontSensor::showRestore(ErrorMetric errMet, cv::Mat& fm)
   //cv::imshow("restored" + std::to_string(++i), fm);
 //  cv::waitKey();
 }
+*/

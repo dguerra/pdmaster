@@ -63,12 +63,9 @@ void SubimageLayout::navigateThrough()
   cv::Scalar imageDkOffset = cv::sum(dk.mul(apodizationWindow))/cv::sum(apodizationWindow);
 
   WavefrontSensor wSensor;
-  cv::Mat phase = wSensor.WavefrontSensing((d0-imageD0Offset).mul(apodizationWindow), (dk-imageDkOffset).mul(apodizationWindow),
-                                   noiseFocused.meanPower(), noiseDefocused.meanPower());
-
-  TelescopeSettings tsettings(subimageSize_);
-  cv::Mat amplitude = Zernikes<double>::phaseMapZernike(1, phase.cols, tsettings.pupilRadiousPixels());
-  OpticalSystem foc(phase, amplitude);
+  std::vector<cv::Mat> d = {(d0-imageD0Offset).mul(apodizationWindow), (dk-imageDkOffset).mul(apodizationWindow)};
+  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()};
+  cv::Mat phaseResult = wSensor.WavefrontSensing(d, meanPowerNoise);
 }
 
 
