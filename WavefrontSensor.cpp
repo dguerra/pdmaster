@@ -18,7 +18,6 @@
 //#include "ErrorMetric.h"
 #include "GetStep.h"
 #include "TelescopeSettings.h"
-//#include "MonitorLog.h"
 
 constexpr double PI = 2*acos(0.0);
 
@@ -101,8 +100,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   //iterate through this loop until stable solution of zernike coefficients is found
   for (unsigned int iteration = 0; iteration < maximumIterations_; ++iteration)
   {
-	std::cout << "iteration: " << iteration << std::endl;
-
+	  std::cout << "iteration: " << iteration << std::endl;
     int ret = getstep(c, D, diversityPhase, pupilAmplitude, pupilSideLength, zernikesInUse, alignmentSetup, zernikeCatalog,
     		             pupilRadiousP, meanPowerNoise, lmPrevious,
     numberOfNonSingularities, singularityThresholdOverMaximum, dc);

@@ -10,6 +10,8 @@
 
 #include <iostream>
 #include <vector>
+#include <limits>  //numeric_limit<double>::epsilon
+#include <algorithm>    // std::max
 #include "OpticalSystem.h"
 #include "opencv2/opencv.hpp"
 
@@ -26,14 +28,12 @@ public:
   Linearization();
   enum class LinearizationMethod {Newton, LevenbergMarquardt, ConjugateGradients};
   virtual ~Linearization();
-  //represents A matrix in equation: Ax-b=0
-  void computeHessianMatrix_(const std::vector<OpticalSystem>& frameOS, const std::vector<cv::Mat>& dataFrame);
 
   //represents b vector in equation: Ax-b=0
-  void computeGrandientVector_(const std::vector<OpticalSystem>& OS, const std::vector<cv::Mat>& D, const cv::Mat& F, const std::vector<cv::Mat>& zernikeCatalog);
+  void computeGrandientVector_(const std::vector<OpticalSystem>& OS, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase);
 private:
-  cv::Mat A_;   //A is a MxM matrix
   cv::Mat b_;   //b is a 1xM matrix
 };
+
 
 #endif /* LINEARIZATION_H_ */

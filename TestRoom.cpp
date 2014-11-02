@@ -5,6 +5,7 @@
  *      Author: dailos
  */
 
+/*
 #include <iostream>
 #include <complex>
 #include <cmath>
@@ -469,60 +470,6 @@ void test_SVD()
 
 }
 
-void test_AmoebaOptimization()
-{
-  /*
-  struct Func
-  {
-      cv::Mat d1_;
-      cv::Mat d2_;
-      double defocus_;
-
-      Doub operator() (VecDoub_I &x)
-      {
-        double myCoefs[] = {x[0], x[1], x[2], x[3]};
-        std::vector<double> zCoef(myCoefs, myCoefs + sizeof(myCoefs) / sizeof(double) );
-        return LM(zCoef, d1_, d2_, defocus_ );
-      }
-  };
-
-  cv::Mat img;
-  readFITS("/home/dailos/PDPairs/12-06-2013/pd.007.fits", img);
-
-  cv::Rect rect1(0+450,0+450,256,256);
-  cv::Rect rect2(936+450,0+450,256,256);
-
-  //From now on, we work with float values
-  cv::Mat d0 = cv::Mat_<float>(img(rect1).clone());
-  cv::Mat dk = cv::Mat_<float>(img(rect2).clone());
-
-
-  Doub ftol(0.00001);
-  Amoeba am(ftol);
-  VecDoub point;
-  std::cout << "Maximum value for double: " << std::numeric_limits<double>::max() << endl;
-  point.resize(8);
-  point[0]=0.1;
-  point[1]=0.4;
-  point[2]=0.6;
-  point[3]=-0.2;
-
-  Func func;
-  func.d1_ = d0;
-  func.d2_ = dk;
-  func.defocus_ = 2.006087152;
-  Doub del(0.01);
-  VecDoub pmin;
-
-  std::cout << "func: " << func(point) << std::endl;
-  pmin = am.minimize(point, del, func);
-
-  std::cout << "p0: " << pmin[0] << std::endl;
-  std::cout << "p1: " << pmin[1] << std::endl;
-  std::cout << "p2: " << pmin[2] << std::endl;
-  std::cout << "p3: " << pmin[3] << std::endl;
-  */
-}
 
 bool test_fourier()
 {  //check with idl results
@@ -687,3 +634,4 @@ bool test_crosscorrelation()
   //std::cout << conv << std::endl;
   return true;
 }
+*/

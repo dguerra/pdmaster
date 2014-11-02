@@ -47,7 +47,7 @@ void SubimageLayout::navigateThrough()
 
   cv::Mat d0_norm;
   cv::normalize(d0, d0_norm, 0, 1, CV_MINMAX);
-  cv::imshow("d0", d0_norm);
+//  cv::imshow("d0", d0_norm);
 
   NoiseEstimator noiseFocused, noiseDefocused;
   noiseFocused.meanPowerSpectrum(d0);

@@ -15,6 +15,4 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
 		const double& pupilRadiousP, const std::vector<double>& meanPowerNoise, double& lmPrevious,
 		unsigned int& numberOfNonSingularities, double& singularityThresholdOverMaximum, cv::Mat& dc);
 
-cv::Mat backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI);
-
 #endif /* GETSTEP_H_ */

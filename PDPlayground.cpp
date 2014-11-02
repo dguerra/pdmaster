@@ -30,7 +30,6 @@
 #include "FITS.h"
 #include "SubimageLayout.h"
 #include "AWMLE.h"
-#include "Benchmark.h"
 
 #include <chrono>
 

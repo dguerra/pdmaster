@@ -18,8 +18,10 @@ class ErrorMetric
 public:
   ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& defocusedOS, const cv::Mat& D0,
                const cv::Mat& Dk, const double& meanPowerNoiseD0, const double& meanPowerNoiseDk,
-               const std::map<unsigned int, cv::Mat>& zernikeCatalog, const cv::Mat& zernikesInUse);
+               const std::map<unsigned int, cv::Mat>& zernikeCatalog, const cv::Mat& zernikesInUse,
+               cv::Mat& eCoreZeroMean, std::vector<cv::Mat>& dedcCoreZeroMean);
   virtual ~ErrorMetric();
+  cv::Mat backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI);
   cv::Mat E()const {return E_;};
   std::vector<cv::Mat> dEdc()const {return dEdc_;};
   cv::Mat FM()const {return FM_;};

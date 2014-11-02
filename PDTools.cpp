@@ -42,7 +42,8 @@ void shiftQuadrants(cv::Mat& I)
   tmp.copyTo(q2);
 }
 
-
+/*
+ * //GUI FEATURES
 void showHistogram(const cv::Mat& src)
 {
   if (src.channels() != 1)
@@ -139,6 +140,7 @@ void showComplex(const cv::Mat& A, const std::string& txt, const bool& shiftQ, c
 
   cv::waitKey();
 }
+*/
 
 void shift(cv::Mat& I, cv::Mat& O, const int& cxIndex, const int& cyIndex)
 {

@@ -27,9 +27,11 @@ ErrorMetric::ErrorMetric()
 
 }
 
-ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& defocusedOS, const cv::Mat& D0,
-                          const cv::Mat& Dk, const double& meanPowerNoiseD0, const double& meanPowerNoiseDk,
-                          const std::map<unsigned int, cv::Mat>& zernikeCatalog, const cv::Mat& zernikesInUse)
+ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& defocusedOS,
+                          const cv::Mat& D0, const cv::Mat& Dk, const double& meanPowerNoiseD0, 
+                          const double& meanPowerNoiseDk, const std::map<unsigned int, cv::Mat>&
+                          zernikeCatalog, const cv::Mat& zernikesInUse, cv::Mat& eCoreZeroMean,
+                          std::vector<cv::Mat>& dedcCoreZeroMean)
 {
   TelescopeSettings tsettings(D0.cols);
 
@@ -106,6 +108,30 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
   }
 
   compute_dEdc_(T0_cropped, Tk_cropped, D0H, DkH, Q, Q2, dT0dc_cropped, dTkdc_cropped, meanPowerNoiseD0/meanPowerNoiseDk, dEdc_);
+  
+  cv::Mat fm;
+  //showRestore(EM, fm);
+  std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;
+  unsigned int imageCoreSize_ = 70;
+  eCoreZeroMean = backToImageSpace(E_, cv::Size(imageCoreSize_, imageCoreSize_));
+  for(cv::Mat dEdci : dEdc_) dedcCoreZeroMean.push_back(backToImageSpace(dEdci, cv::Size(imageCoreSize_, imageCoreSize_)));
+
+}
+
+cv::Mat ErrorMetric::backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI)
+{
+  cv::Mat imageMatrixROIZeroMean;
+  if(!fourierSpaceMatrix.empty())
+  {
+    cv::Mat imageMatrix;
+    cv::Mat fourierSpaceMatrixShift(fourierSpaceMatrix);
+    //shift quadrants back to origin in the corner, inverse transform, take central region, force zero-mean
+    shift(fourierSpaceMatrixShift, fourierSpaceMatrixShift, fourierSpaceMatrixShift.cols/2, fourierSpaceMatrixShift.rows/2);
+    cv::idft(fourierSpaceMatrixShift, imageMatrix, cv::DFT_REAL_OUTPUT);
+    cv::Mat imageMatrixROI = takeoutImageCore(imageMatrix, centralROI.height);
+    imageMatrixROIZeroMean = imageMatrixROI - cv::mean(imageMatrixROI);
+  }
+  return imageMatrixROIZeroMean;
 }
 
 ErrorMetric::~ErrorMetric()

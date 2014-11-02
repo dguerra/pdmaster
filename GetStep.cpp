@@ -8,8 +8,7 @@
 #include "ErrorMetric.h"
 #include "Optimization.h"
 #include "GetStep.h"
-#include "PDTools.h"
-#include "MonitorLog.h"
+//#include "PDTools.h"
 #include "Zernikes.h"
 #include "Zernikes.cpp"
 
@@ -39,16 +38,18 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
     }
 
     double filterTuning_ = 1.0;
-    unsigned int imageCoreSize_ = 70;
-    ErrorMetric EM(os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse);
-    cv::Mat fm;
-    //showRestore(EM, fm);
-    std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;
-    cv::Mat eCoreZeroMean = backToImageSpace(EM.E(), cv::Size(imageCoreSize_, imageCoreSize_));
+    cv::Mat eCoreZeroMean;
     std::vector<cv::Mat> dedcCoreZeroMean;
-    for(cv::Mat dEdci : EM.dEdc()) dedcCoreZeroMean.push_back(backToImageSpace(dEdci, cv::Size(imageCoreSize_, imageCoreSize_)));
+    ErrorMetric EM(os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse, eCoreZeroMean, dedcCoreZeroMean);
+    //cv::Mat fm;
+    //showRestore(EM, fm);
+    //std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;
+    //cv::Mat eCoreZeroMean = backToImageSpace(EM.E(), cv::Size(imageCoreSize_, imageCoreSize_));
+    //std::vector<cv::Mat> dedcCoreZeroMean;
+    //for(cv::Mat dEdci : EM.dEdc()) dedcCoreZeroMean.push_back(backToImageSpace(dEdci, cv::Size(imageCoreSize_, imageCoreSize_)));
 
     double lmCurrent = cv::sum(eCoreZeroMean.mul(eCoreZeroMean)).val[0]/eCoreZeroMean.total();
+  
     double lmIncrement = std::abs(lmCurrent - lmPrevious)/lmCurrent;
 
     cv::Mat c2, dc2;
@@ -56,10 +57,6 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
     cv::pow(dc.setTo(0, alignmentSetup), 2.0, dc2);
     double cRMS = std::sqrt(cv::sum(c2).val[0]);
     double dcRMS = std::sqrt(cv::sum(dc2).val[0]);
-
-//    Record rec(iteration, lmCurrent, lmIncrement, c, cRMS, dcRMS, numberOfNonSingularities, singularityThresholdOverMaximum);
-//    rec.printValues();
-//    monitorLog.add(rec);
 
     std::cout << "lm_: " << lmCurrent << std::endl;
     std::cout << "lmIncrement_: " << lmIncrement << std::endl;
@@ -94,20 +91,3 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
   return 0;
 }
 
-
-
-cv::Mat backToImageSpace(const cv::Mat& fourierSpaceMatrix, const cv::Size& centralROI)
-{
-  cv::Mat imageMatrixROIZeroMean;
-  if(!fourierSpaceMatrix.empty())
-  {
-    cv::Mat imageMatrix;
-    cv::Mat fourierSpaceMatrixShift(fourierSpaceMatrix);
-    //shift quadrants back to origin in the corner, inverse transform, take central region, force zero-mean
-    shift(fourierSpaceMatrixShift, fourierSpaceMatrixShift, fourierSpaceMatrixShift.cols/2, fourierSpaceMatrixShift.rows/2);
-    cv::idft(fourierSpaceMatrixShift, imageMatrix, cv::DFT_REAL_OUTPUT);
-    cv::Mat imageMatrixROI = takeoutImageCore(imageMatrix, centralROI.height);
-    imageMatrixROIZeroMean = imageMatrixROI - cv::mean(imageMatrixROI);
-  }
-  return imageMatrixROIZeroMean;
-}

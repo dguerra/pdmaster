@@ -32,7 +32,6 @@ void test_flip();
 void test_QualityMetric();
 void test_ErrorMetric();
 void test_OpticalSystem();
-void test_AmoebaOptimization();
 void test_NoiseEstimator();
 void test_Noise();
 void test_phaseMapZernikeSum();

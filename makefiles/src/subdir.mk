@@ -5,14 +5,12 @@
 # Add inputs and outputs from these tool invocations to the build variables 
 CPP_SRCS += \
 ../AWMLE.cpp \
-../Benchmark.cpp \
 ../EffectivePixel.cpp \
 ../ErrorMetric.cpp \
 ../FITS.cpp \
 ../ImageQualityMetric.cpp \
 ../Linearization.cpp \
 ../MatrixEquation.cpp \
-../MonitorLog.cpp \
 ../NoiseEstimator.cpp \
 ../NoiseFilter.cpp \
 ../OpticalSystem.cpp \
@@ -29,14 +27,12 @@ CPP_SRCS += \
 
 OBJS += \
 ./src/AWMLE.o \
-./src/Benchmark.o \
 ./src/EffectivePixel.o \
 ./src/ErrorMetric.o \
 ./src/FITS.o \
 ./src/ImageQualityMetric.o \
 ./src/Linearization.o \
 ./src/MatrixEquation.o \
-./src/MonitorLog.o \
 ./src/NoiseEstimator.o \
 ./src/NoiseFilter.o \
 ./src/OpticalSystem.o \
@@ -53,14 +49,12 @@ OBJS += \
 
 CPP_DEPS += \
 ./src/AWMLE.d \
-./src/Benchmark.d \
 ./src/EffectivePixel.d \
 ./src/ErrorMetric.d \
 ./src/FITS.d \
 ./src/ImageQualityMetric.d \
 ./src/Linearization.d \
 ./src/MatrixEquation.d \
-./src/MonitorLog.d \
 ./src/NoiseEstimator.d \
 ./src/NoiseFilter.d \
 ./src/OpticalSystem.d \
