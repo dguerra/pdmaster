@@ -33,7 +33,7 @@ void SubimageLayout::navigateThrough()
   //nextSubimage()
   //The following actions should be done by the class in every sub-image
   cv::Mat dat, img;
-  readFITS("./pd.004.fits", dat);
+  readFITS("../inputs/pd.004.fits", dat);
   dat.convertTo(img, cv::DataType<double>::type);
 
   std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;

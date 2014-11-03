@@ -13,7 +13,6 @@
 
 void readFITS(const std::string& fitsname, cv::Mat& cvImage)
 {
-
   fitsfile *fptr = nullptr;
   int status(0);
   char err_text[100];
@@ -128,5 +127,4 @@ void writeFITS(const cv::Mat& cvImage, const std::string& filename)
   }
   fits_close_file(fptr, &status);
   fits_report_error(stderr, status);
-
 }

@@ -74,7 +74,7 @@ CPP_DEPS += \
 src/%.o: ../%.cpp
 	@echo 'Building file: $<'
 	@echo 'Invoking: GCC C++ Compiler'
-	g++ -std=c++11 -fPIC -L../lib -I../include -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
+	g++ --param ggc-min-expand=0 --param ggc-min-heapsize=101072 -std=c++11 -fPIC -L../lib -I../include -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
 	@echo 'Finished building: $<'
 	@echo ' '
 
