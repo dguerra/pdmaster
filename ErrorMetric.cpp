@@ -16,6 +16,9 @@
 #include "NoiseFilter.h"
 
 
+//cost function, or objective function, or energy: function to be optimized
+//gradient: vector gradient that contains function derivatives over each variables
+//
 //Gonsalves objective function
 //www.google.com
 

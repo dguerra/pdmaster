@@ -9,7 +9,8 @@ CPP_SRCS += \
 ../ErrorMetric.cpp \
 ../FITS.cpp \
 ../ImageQualityMetric.cpp \
-../Linearization.cpp \
+../Minimization.cpp \
+../Metric.cpp \
 ../MatrixEquation.cpp \
 ../NoiseEstimator.cpp \
 ../NoiseFilter.cpp \
@@ -31,7 +32,8 @@ OBJS += \
 ./src/ErrorMetric.o \
 ./src/FITS.o \
 ./src/ImageQualityMetric.o \
-./src/Linearization.o \
+./src/Minimization.o \
+./src/Metric.o \
 ./src/MatrixEquation.o \
 ./src/NoiseEstimator.o \
 ./src/NoiseFilter.o \
@@ -53,7 +55,8 @@ CPP_DEPS += \
 ./src/ErrorMetric.d \
 ./src/FITS.d \
 ./src/ImageQualityMetric.d \
-./src/Linearization.d \
+./src/Minimization.d \
+./src/Metric.d \
 ./src/MatrixEquation.d \
 ./src/NoiseEstimator.d \
 ./src/NoiseFilter.d \

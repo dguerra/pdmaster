@@ -5,7 +5,7 @@
  *      Author: dailos
  */
 
-/*
+
 #include <iostream>
 #include <complex>
 #include <cmath>
@@ -22,6 +22,25 @@
 #include "AWMLE.h"
 #include "ImageQualityMetric.h"
 
+template<class T>
+cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
+{
+  double sigma = 5.0;
+  std::random_device rdevice;
+  std::default_random_engine generator(rdevice());
+  std::normal_distribution<> distribution(0, sigma);
+
+  cv::Mat A = cv::Mat(xSize, ySize, cv::DataType<T>::type);
+  for(auto it = A.begin<T>(); it != A.end<T>(); ++it)
+  {
+    (*it) = (T)distribution(generator);
+  }
+  return A;
+}
+
+
+
+/*
 void test_generizedPupilFunctionVsOTF()
 {
   double diversityFactor_ = -2.21209;
@@ -104,22 +123,6 @@ void test_zernike_wavelets_decomposition()
   cv::waitKey();
 }
 
-template<class T>
-cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
-{
-  double sigma = 5.0;
-  std::random_device rdevice;
-  std::default_random_engine generator(rdevice());
-  std::normal_distribution<> distribution(0, sigma);
-
-  cv::Mat A = cv::Mat(xSize, ySize, cv::DataType<T>::type);
-  for(auto it = A.begin<T>(); it != A.end<T>(); ++it)
-  {
-    (*it) = (T)distribution(generator);
-  }
-  return A;
-}
-
 void test_noiseFilter()
 {
   unsigned int ncols(5), nrows(5);
@@ -153,6 +156,7 @@ bool test_conjComplex()
   std::cout << cmp << std::endl;
   return true;
 }
+
 void test_selectCentralROI()
 {
   cv::Mat o = cv::Mat::zeros(10, 20, cv::DataType<double>::type);
@@ -634,4 +638,5 @@ bool test_crosscorrelation()
   //std::cout << conv << std::endl;
   return true;
 }
+
 */
