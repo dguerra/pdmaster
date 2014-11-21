@@ -75,6 +75,7 @@ class Zernikes
   static cv::Mat phaseMapZernike(const unsigned int& j, const unsigned int& sideLength, const double& radiousLength);
 
 
+  static std::vector<cv::Mat> zernikeBase(const unsigned int& maximumZernikeIndex, const unsigned int& sideLength, const double& radiousLength);
   static std::map<unsigned int, cv::Mat> buildCatalog(const unsigned int& maximumZernikeIndex, const unsigned int& sideLength, const double& radiousLength);
 
   /*

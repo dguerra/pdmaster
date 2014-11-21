@@ -20,6 +20,7 @@ bool test_shift();
 void test_conv_flaw();
 void test_wavelets();
 bool test_conjComplex();
+bool test_minimization();
 bool test_crosscorrelation();
 bool test_specular();
 void test_selectCentralROI();

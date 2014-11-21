@@ -14,6 +14,7 @@
 #include "TelescopeSettings.h"
 #include "NoiseEstimator.h"
 #include "NoiseFilter.h"
+#include "Metric.h"
 
 
 //cost function, or objective function, or energy: function to be optimized
@@ -34,7 +35,7 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
                           const cv::Mat& D0, const cv::Mat& Dk, const double& meanPowerNoiseD0, 
                           const double& meanPowerNoiseDk, const std::map<unsigned int, cv::Mat>&
                           zernikeCatalog, const cv::Mat& zernikesInUse, cv::Mat& eCoreZeroMean,
-                          std::vector<cv::Mat>& dedcCoreZeroMean)
+                          std::vector<cv::Mat>& dedcCoreZeroMean )
 {
   TelescopeSettings tsettings(D0.cols);
 
@@ -52,16 +53,37 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
   cv::Mat Q = makeComplex(Q_);
 
   cv::Mat Q2 = makeComplex(Q_.mul(Q_));
+  //compute objecte estimate
   compute_FM_(T0_cropped, Tk_cropped, D0, Dk, meanPowerNoiseD0/meanPowerNoiseDk, Q2, FM_);
+  
 
   //Create noise filter here to use later on
   NoiseFilter filter(T0_cropped, Tk_cropped, D0, Dk, Q_.mul(Q_), meanPowerNoiseD0, meanPowerNoiseDk);
-  noiseFilter_ = makeComplex(filter.H());
+  noiseFilter_ = makeComplex(filter.H()); //makeComplex(cv::Mat::ones(D0.size(), D0.depth()));
+  
   cv::Mat D0H, DkH;
   cv::mulSpectrums(D0, noiseFilter_, D0H, cv::DFT_COMPLEX_OUTPUT);
   cv::mulSpectrums(Dk, noiseFilter_, DkH, cv::DFT_COMPLEX_OUTPUT);
-
+  
   compute_E_(T0_cropped, Tk_cropped, D0H, DkH, Q, E_);
+  
+  /////Create L = sum{ abs(D0H - FHT0)^2 + abs(DkH - FHTk)^2 }
+  cv::Mat FH;
+  cv::mulSpectrums(FM_, noiseFilter_, FH, cv::DFT_COMPLEX_OUTPUT);
+  cv::Mat FHT0, FHTk;
+  cv::mulSpectrums(FH, T0_cropped, FHT0, cv::DFT_COMPLEX_OUTPUT);
+  cv::mulSpectrums(FH, Tk_cropped, FHTk, cv::DFT_COMPLEX_OUTPUT);
+  cv::Mat abs0 = absComplex(D0H - FHT0);
+  cv::Mat absk = absComplex(DkH - FHTk);
+  double L = cv::sum(abs0.mul(abs0) + meanPowerNoiseD0/meanPowerNoiseDk * absk.mul(absk)).val[0];
+  std::cout << "L value old style: " << L << std::endl;
+  
+  /////Create L = sum{ abs(E)^2 }
+//  cv::Mat EH;
+//  cv::mulSpectrums(E_, noiseFilter_, EH, cv::DFT_COMPLEX_OUTPUT);
+//  cv::Mat absE = absComplex(EH);
+//  std::cout << "L value from E: " << cv::sum(absE.mul(absE)).val[0] << std::endl;
+  
 
   compute_dTdc_(focusedOS, zernikeCatalog, zernikesInUse, dT0dc_);
   compute_dTdc_(defocusedOS, zernikeCatalog, zernikesInUse, dTkdc_);

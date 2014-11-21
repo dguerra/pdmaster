@@ -6,11 +6,14 @@
  */
 #include <iostream>
 #include "ErrorMetric.h"
+#include "Metric.h"
 #include "Optimization.h"
 #include "GetStep.h"
 //#include "PDTools.h"
 #include "Zernikes.h"
 #include "Zernikes.cpp"
+
+
 
 int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& diversityPhase, const cv::Mat& pupilAmplitude,
 		const unsigned int& pupilSideLength, const cv::Mat& zernikesInUse, const cv::Mat& alignmentSetup,
@@ -18,10 +21,7 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
 		const double& pupilRadiousP, const std::vector<double>& meanPowerNoise, double& lmPrevious,
 		unsigned int& numberOfNonSingularities, double& singularityThresholdOverMaximum, cv::Mat& dc)
 {
-
-    cv::Mat offsetPupilPhase = Zernikes<double>::phaseMapZernikeSum(pupilSideLength,
-    		pupilRadiousP, c.setTo(0, 1-zernikesInUse ));
-
+    cv::Mat offsetPupilPhase = Zernikes<double>::phaseMapZernikeSum(pupilSideLength, pupilRadiousP, c.setTo(0, 1-zernikesInUse ));
 
     std::vector<cv::Mat> pupilPhase;
     for(cv::Mat diversityPhase_i : diversityPhase)
@@ -40,7 +40,30 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
     double filterTuning_ = 1.0;
     cv::Mat eCoreZeroMean;
     std::vector<cv::Mat> dedcCoreZeroMean;
-    ErrorMetric EM(os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse, eCoreZeroMean, dedcCoreZeroMean);
+   
+  
+  //little test to compare both objects estimates
+//  {
+//    Metric mm;
+//    cv::Mat c_defocused = c.clone();  
+//    //Defocus
+//    c_defocused.at<double>(3,0) += -2.21209 * 3.141592653589793238 / (2.0*std::sqrt(3.0));
+//    cv::Mat c_all;
+//    cv::vconcat(c, c_defocused, c_all);   //concatenate all of image phase coefficients into one single vector
+//    std::vector<double> meanPowerNoise = {2.08519e-09, 1.9587e-09};    //sample case
+//    mm.objectEstimate(c_all, D, Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP), meanPowerNoise);
+//    std::cout << "obejctiveFunction: " << mm.objectiveFunction(c_all, D, Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP), meanPowerNoise) << std::endl;
+//    std::cout << "F.size(): " << mm.F().size() << std::endl;
+//    std::cout << "F(100,100): " << mm.F().at<std::complex<double> >(100,100) << std::endl;     
+//  } 
+  
+      
+    ErrorMetric EM( os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, 
+                    meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse, eCoreZeroMean, dedcCoreZeroMean );
+    std::cout << "filter.old.(80,80): " <<  EM.noiseFilter().at<std::complex<double> >(80,80) << std::endl;
+    std::cout << "EM.FM().size(): " <<  EM.FM().size() << std::endl;
+    std::cout << "EM.FM(100,100): " <<  EM.FM().at<std::complex<double> >(100,100) << std::endl;
+    
     //cv::Mat fm;
     //showRestore(EM, fm);
     //std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;

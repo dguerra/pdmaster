@@ -95,7 +95,6 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   double pupilRadiousP = tsettings.pupilRadiousPixels();
   cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, pupilRadiousP);
 
-  //cv::Mat offsetPupilPhase, defocusedPupilPhase;
   double lmPrevious(0.0);
   //iterate through this loop until stable solution of zernike coefficients is found
   for (unsigned int iteration = 0; iteration < maximumIterations_; ++iteration)

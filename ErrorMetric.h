@@ -26,10 +26,13 @@ public:
   std::vector<cv::Mat> dEdc()const {return dEdc_;};
   cv::Mat FM()const {return FM_;};
   cv::Mat noiseFilter()const{return noiseFilter_;};
+  cv::Mat Q()const {return Q_;};
+  
+  //made public for testing
+  void compute_Q_(const cv::Mat& T0, const cv::Mat& Tk, const double& gamma, cv::Mat& Q);
 
 private:
   ErrorMetric();  //Private default constructor
-  void compute_Q_(const cv::Mat& T0, const cv::Mat& Tk, const double& gamma, cv::Mat& Q);
   void computeObjectEstimate_(const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& S, const double& gamma, cv::Mat& F, cv::Mat& Q);
   void compute_E_(const cv::Mat& T0, const cv::Mat& Tk,
                   const cv::Mat& D0, const cv::Mat& Dk, const cv::Mat& Q, cv::Mat& E);

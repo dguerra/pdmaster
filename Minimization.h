@@ -30,7 +30,7 @@
 //Helpter struct that turns a multidimensional functor into 1-dim, through point p and direction xi
 template<class T>
 struct F1dim
-{
+{  //could be implemented through function adaptors, read more about it
   cv::Mat_<double> p_;
   cv::Mat_<double> xi_;
   T func_;
@@ -96,6 +96,7 @@ void Minimization::dfpmin(cv::Mat_<double> &p, const double gtol, int &iter, dou
     abs_p.setTo(1.0, abs_p > 1.0);
     
 		cv::divide(cv::abs(xi), abs_p, temp);
+    //If all of temp elements are lower than TOLX, algorithm terminates
 		if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ) return;
     
 		g.copyTo(dg);

@@ -177,6 +177,21 @@ std::map<unsigned int, cv::Mat> Zernikes<T>::buildCatalog(const unsigned int& ma
   }
 }
 
+
+//Same as buildCatalog, but this is a std::vector of zernike polonomials instead of a std::map
+template<typename T>
+std::vector<cv::Mat> Zernikes<T>::zernikeBase(const unsigned int& maximumZernikeIndex, const unsigned int& sideLength, const double& radiousLength)
+{
+  std::vector<cv::Mat> base;
+  for(unsigned int currentIndex=1; currentIndex <= maximumZernikeIndex; ++currentIndex)
+  {
+    base.push_back(phaseMapZernike(currentIndex, sideLength, radiousLength));
+  }
+
+  return base;
+}
+
+
 ///Noll ordering scheme
 template<typename T>
 void Zernikes<T>::getNM(const unsigned int& j, unsigned int& n, int& m)
