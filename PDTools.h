@@ -20,6 +20,7 @@ void convolveDFT(const cv::Mat& imgOriginal, const cv::Mat& kernel, cv::Mat& out
 unsigned int optimumSideLength(const unsigned int& minimumLength, const double& radiousLength);
 cv::Mat takeoutImageCore(const cv::Mat& im, const unsigned int& imageCoreSize);
 cv::Mat selectCentralROI(const cv::Mat& im, const cv::Size& roiSize);
+cv::Mat centralROI(const cv::Mat& im, const cv::Size& roiSize, cv::Mat& roi);
 void writeOnImage(cv::Mat& img, const std::string& text);
 cv::Mat makeCanvas(std::vector<cv::Mat>& vecMat, int windowHeight, int nRows);
 cv::Mat absComplex(const cv::Mat& complexI);

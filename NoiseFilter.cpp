@@ -33,14 +33,15 @@ NoiseFilter::NoiseFilter(const cv::Mat& T0, const cv::Mat& Tk, const cv::Mat& D0
   cv::Mat D0T0, DkTk;
   cv::mulSpectrums(D0,conjComplex(T0), D0T0, cv::DFT_COMPLEX_OUTPUT);
   cv::mulSpectrums(Dk,conjComplex(Tk), DkTk, cv::DFT_COMPLEX_OUTPUT);
-  cv::Mat absTerm = absComplex(D0T0 + ((meanPowerNoiseD0/meanPowerNoiseDk)*DkTk));
+  //cv::Mat absTerm = absComplex(D0T0 + ((meanPowerNoiseD0/meanPowerNoiseDk)*DkTk));   //we don't use this version anymore
+  cv::Mat absTerm = absComplex(D0T0 + DkTk);
   
   //Both Q2 and absTerm should be single channel images (real images)
   cv::multiply(Q2, absTerm.mul(absTerm), filterDenomimator);
   
   cv::blur(filterDenomimator, smoothedFilterDenomimator, cv::Size(3,3));
 
-  smoothedFilterDenomimator.setTo(1.0e-35, smoothedFilterDenomimator < 1.0e-35);  //CAUTION! I need an explanation!
+  //smoothedFilterDenomimator.setTo(1.0e-35, smoothedFilterDenomimator < 1.0e-35);  //CAUTION! I need an explanation!
   cv::pow(smoothedFilterDenomimator, -1.0, smoothedFilterDenomimator);
   
   cv::Mat filterH = meanPowerNoiseD0 * smoothedFilterDenomimator;

@@ -43,34 +43,41 @@ int getstep(cv::Mat& c, const std::vector<cv::Mat>& D, const std::vector<cv::Mat
    
   
   //little test to compare both objects estimates
-//  {
-//    Metric mm;
-//    cv::Mat c_defocused = c.clone();  
-//    //Defocus
-//    c_defocused.at<double>(3,0) += -2.21209 * 3.141592653589793238 / (2.0*std::sqrt(3.0));
-//    cv::Mat c_all;
-//    cv::vconcat(c, c_defocused, c_all);   //concatenate all of image phase coefficients into one single vector
-//    std::vector<double> meanPowerNoise = {2.08519e-09, 1.9587e-09};    //sample case
-//    mm.objectEstimate(c_all, D, Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP), meanPowerNoise);
-//    std::cout << "obejctiveFunction: " << mm.objectiveFunction(c_all, D, Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP), meanPowerNoise) << std::endl;
-//    std::cout << "F.size(): " << mm.F().size() << std::endl;
-//    std::cout << "F(100,100): " << mm.F().at<std::complex<double> >(100,100) << std::endl;     
-//  } 
+  {
+    Metric mm;
+    cv::Mat c_defocused = c.clone();  
+    //Defocus
+    c_defocused.at<double>(3,0) += -2.21209 * 3.141592653589793238 / (2.0*std::sqrt(3.0));
+    cv::Mat c_all;
+    cv::vconcat(c, c_defocused, c_all);   //concatenate all of image phase coefficients into one single vector
+    std::vector<double> meanPowerNoise = {2.08519e-09, 1.9587e-09};    //sample case
+    std::vector<cv::Mat> zBase = Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP);
+    std::cout << "gradient eq: " << mm.gradient(c_all, D, zBase, meanPowerNoise).t() << std::endl;
+    {
+      double EPS(1.0e-8);
+	    cv::Mat xh = c_all.clone();
+      Metric p0;
+	    double fold = p0.objectiveFunction(c_all, D, zBase, meanPowerNoise);
   
-      
+      cv::Mat temp = c_all.clone();
+      cv::Mat h = EPS * cv::abs(temp);
+      h.setTo(EPS, h == 0.0);
+      xh = temp + h;
+      h = xh - temp;
+      Metric p1;
+      double fh = p1.objectiveFunction(xh, D, zBase, meanPowerNoise);
+      xh = temp.clone();
+      cv::Mat df;
+      cv::divide((fh - fold), h, df);
+  
+      std::cout << "gradient diff: " << df.t() << std::endl;
+    } 
+  } 
+  
+    
     ErrorMetric EM( os.front(), os.back(), D.front(), D.back(), meanPowerNoise.front()*filterTuning_, 
                     meanPowerNoise.back()*filterTuning_, zernikeCatalog, zernikesInUse, eCoreZeroMean, dedcCoreZeroMean );
-    std::cout << "filter.old.(80,80): " <<  EM.noiseFilter().at<std::complex<double> >(80,80) << std::endl;
-    std::cout << "EM.FM().size(): " <<  EM.FM().size() << std::endl;
-    std::cout << "EM.FM(100,100): " <<  EM.FM().at<std::complex<double> >(100,100) << std::endl;
     
-    //cv::Mat fm;
-    //showRestore(EM, fm);
-    //std::cout << "Total restored image energy: " << cv::sum(fm) << std::endl;
-    //cv::Mat eCoreZeroMean = backToImageSpace(EM.E(), cv::Size(imageCoreSize_, imageCoreSize_));
-    //std::vector<cv::Mat> dedcCoreZeroMean;
-    //for(cv::Mat dEdci : EM.dEdc()) dedcCoreZeroMean.push_back(backToImageSpace(dEdci, cv::Size(imageCoreSize_, imageCoreSize_)));
-
     double lmCurrent = cv::sum(eCoreZeroMean.mul(eCoreZeroMean)).val[0]/eCoreZeroMean.total();
   
     double lmIncrement = std::abs(lmCurrent - lmPrevious)/lmCurrent;

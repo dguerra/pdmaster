@@ -60,14 +60,14 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   cv::Mat c = cv::Mat::zeros(14, 1, cv::DataType<double>::type);
   cv::Mat dc = cv::Mat::ones(c.size(), cv::DataType<double>::type);  //random initialization with rms greater than dcRMS_minimum
   cv::Mat zernikesInUse = cv::Mat::ones(c.size(), cv::DataType<bool>::type); //true where zernike index is used and false otherwise
-  zernikesInUse.at<bool>(0,0) = false;
-  zernikesInUse.at<bool>(0,1) = false;
-  zernikesInUse.at<bool>(0,2) = false;
+ // zernikesInUse.at<bool>(0,0) = false;
+ // zernikesInUse.at<bool>(0,1) = false;
+ // zernikesInUse.at<bool>(0,2) = false;
 
   cv::Mat alignmentSetup = cv::Mat::zeros(c.size(), cv::DataType<bool>::type); //true for piston and tip-tilt coeffcients only
-  alignmentSetup.at<bool>(0,0) = true;
-  alignmentSetup.at<bool>(0,1) = true;
-  alignmentSetup.at<bool>(0,2) = true;
+ // alignmentSetup.at<bool>(0,0) = true;
+ // alignmentSetup.at<bool>(0,1) = true;
+ // alignmentSetup.at<bool>(0,2) = true;
 
   unsigned int pupilSideLength = optimumSideLength(d_size.width/2, tsettings.pupilRadiousPixels());
   std::cout << "pupilSideLength: " << pupilSideLength << std::endl;

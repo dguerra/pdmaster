@@ -75,14 +75,16 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
   cv::mulSpectrums(FH, Tk_cropped, FHTk, cv::DFT_COMPLEX_OUTPUT);
   cv::Mat abs0 = absComplex(D0H - FHT0);
   cv::Mat absk = absComplex(DkH - FHTk);
-  double L = cv::sum(abs0.mul(abs0) + meanPowerNoiseD0/meanPowerNoiseDk * absk.mul(absk)).val[0];
-  std::cout << "L value old style: " << L << std::endl;
+  
+  //cv::Mat accDiff = abs0.mul(abs0) + meanPowerNoiseD0/meanPowerNoiseDk * absk.mul(absk);
+  cv::Mat accDiff = abs0.mul(abs0) + absk.mul(absk);
+  std::cout << "L value old from diff: " << cv::sum(accDiff).val[0] << std::endl;
   
   /////Create L = sum{ abs(E)^2 }
-//  cv::Mat EH;
-//  cv::mulSpectrums(E_, noiseFilter_, EH, cv::DFT_COMPLEX_OUTPUT);
-//  cv::Mat absE = absComplex(EH);
-//  std::cout << "L value from E: " << cv::sum(absE.mul(absE)).val[0] << std::endl;
+  cv::Mat EH;
+  cv::mulSpectrums(E_, noiseFilter_, EH, cv::DFT_COMPLEX_OUTPUT);
+  cv::Mat absE = absComplex(EH);
+  std::cout << "L value old from E: " << cv::sum(absE.mul(absE)).val[0] << std::endl;
   
 
   compute_dTdc_(focusedOS, zernikeCatalog, zernikesInUse, dT0dc_);

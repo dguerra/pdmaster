@@ -13,6 +13,7 @@
 #include <limits>  //numeric_limit<double>::epsilon
 #include <algorithm>    // std::max
 #include <cmath>   //std::abs
+#include <functional>   //function objects
 #include "opencv2/opencv.hpp"
 #include "CustomException.h"
 
@@ -58,80 +59,109 @@ public:
   template <class T> double brent(T &func);
   double xmin,fmin;   //Variable used by brent 1D minimization method
 	const double tol = 3.0e-8;   //Precision at which the minimum is found
+  const double gtol = 3.0e-8;   //Precision gradient at which the minimum is found
   
+  const int ITMAX = 200;  //maximum number of steps to reach the minimum
   //Search func minimum along xi direction from point p
   template<class T>
   double linmin(cv::Mat_<double>& p, cv::Mat_<double>& xi, T &func);
   
   //Build gradient and set next point a direction in convergence to the minimum
   template <class T, class U>
-  void dfpmin(cv::Mat_<double> &p, const double gtol, int &iter, double &fret, T &func, U &dfunc);
-    
+  void dfpmin(cv::Mat_<double> &p, int &iter, double &fret, T &func, U &dfunc);
+  
+  template <class T, class U>
+  int nextStep(cv::Mat_<double> &p, cv::Mat_<double> &xi, cv::Mat_<double> &g, 
+               cv::Mat_<double> &hessin, double &fret, T &func, U &dfunc);
+ 
+  template<class T, class U>
+  void minimize(cv::Mat_<double> &p, const cv::Mat_<double> &Q2_constraints, int &iter, double &fret, 
+                T &func, U &dfunc);
 };
 
+template<class T, class U>
+void Minimization::minimize(cv::Mat_<double> &p, const cv::Mat_<double> &Q2_constraints, int &iter, double &fret, 
+                            T &func, U &dfunc)
+{
+  //build up new functions func and dfunc in the constrained space with fewer unknowns
+//  F_constrained f_constrained(func, Q2_constraints);
+//  DF_constrained df_constrained(dfunc, Q2_constraints);
+  //Starting point in the constraints space
+//  cv::Mat_<double> p_constrained = cv::Mat::zeros(Q2_constraints.cols, 1, cv::DataType<double>::type);
+//  dfpmin(p_constrained, iter, fret, f_constrained, df_constrained);
+//  p = Q2_constraints * p_constrained;
+}
 
 template <class T, class U>
-void Minimization::dfpmin(cv::Mat_<double> &p, const double gtol, int &iter, double &fret, T &func, U &dfunc)
+void Minimization::dfpmin(cv::Mat_<double> &p, int &iter, double &fret, T &func, U &dfunc)
 {
-  const int ITMAX = 200;
-	const double EPS = std::numeric_limits<double>::epsilon();
-	const double TOLX = 4 * EPS;
-	double den, fac, fad, fae, sumdg, sumxi;
 	int n = p.total();   //Check the vector has only one column first
-	cv::Mat_<double> dg(n,1), g(n,1), hdg(n,1), xi(n,1);
+ 
+	cv::Mat_<double> g, xi;
 	cv::Mat_<double> hessin = cv::Mat::eye(n, n, cv::DataType<double>::type);  //initialize to identity matrix
 	fret = func(p);
 	g = dfunc(p);
- 	
   xi = -1 * g;  //first direction is the opposite to the gradient
+  
+  
+  //variables: p:[point], xi:[search direction], func:[function], dfunc:[gradient function], g:[gradient at p], h:[hessian at p], 
   
 	for (int its=0;its<ITMAX;its++)
   {
 		iter = its;
-    //we use linmin uses brent method inside to look for the minimum in 1D
-    fret = linmin(p, xi, func);
-				
-    cv::Mat_<double> temp;
-		cv::Mat_<double> abs_p = cv::abs(p);
-    abs_p.setTo(1.0, abs_p > 1.0);
-    
-		cv::divide(cv::abs(xi), abs_p, temp);
-    //If all of temp elements are lower than TOLX, algorithm terminates
-		if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ) return;
-    
-		g.copyTo(dg);
-		g = dfunc(p);
-    
-		den = cv::max(fret, 1.0);
-		cv::multiply(cv::abs(g), abs_p / den, temp);
-		if ( cv::checkRange(temp, true, nullptr, 0.0, gtol) ) return;
-    
-		dg  = g - dg;
-		hdg = hessin * dg;
-    
-		fac = fae = sumdg = sumxi = 0.0;
-    
-    fac = dg.dot(xi);
-		fae = dg.dot(hdg);
-		sumdg = dg.dot(dg);
-		sumxi = xi.dot(xi);
-    
-		if (fac > std::sqrt(EPS * sumdg * sumxi)) 
-    {
-			fac = 1.0/fac;
-			fad = 1.0/fae;
-			dg = fac * xi - fad * hdg;   //Vector that makes BFGS different form DFP method
-      
-      hessin += fac * xi * xi.t() - fad * hdg * hdg.t() + fae * dg * dg.t();
-		}
-    
-		
-		xi = -hessin * g;
-		
+    if(nextStep(p, xi, g, hessin, fret, func, dfunc)) return;   //minimum reached
 	}
 	throw("too many iterations in dfpmin");
 }
 
+template <class T, class U>
+int Minimization::nextStep(cv::Mat_<double> &p, cv::Mat_<double> &xi, cv::Mat_<double> &g, 
+                           cv::Mat_<double> &hessin, double &fret, T &func, U &dfunc)
+{
+	const double EPS = std::numeric_limits<double>::epsilon();
+	const double TOLX = 4 * EPS;
+  double den, fac, fad, fae, sumdg, sumxi;
+  cv::Mat_<double> dg, hdg;
+  //we use linmin uses brent method inside to look for the minimum in 1D
+  fret = linmin(p, xi, func);
+				
+  cv::Mat_<double> temp;
+	cv::Mat_<double> abs_p = cv::abs(p);
+  abs_p.setTo(1.0, abs_p > 1.0);
+    
+	cv::divide(cv::abs(xi), abs_p, temp);
+  //If all of temp elements are lower than TOLX, algorithm terminates
+	if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ) return 1;   //minimum reached
+    
+	g.copyTo(dg);
+	g = dfunc(p);
+    
+	den = cv::max(fret, 1.0);
+	cv::multiply(cv::abs(g), abs_p / den, temp);
+	if ( cv::checkRange(temp, true, nullptr, 0.0, gtol) ) return 1;   //minimum reached
+    
+	dg  = g - dg;
+	hdg = hessin * dg;
+    
+	fac = fae = sumdg = sumxi = 0.0;
+    
+  fac = dg.dot(xi);
+	fae = dg.dot(hdg);
+	sumdg = dg.dot(dg);
+	sumxi = xi.dot(xi);
+    
+	if (fac > std::sqrt(EPS * sumdg * sumxi)) 
+  {
+		fac = 1.0/fac;
+		fad = 1.0/fae;
+		dg = fac * xi - fad * hdg;   //Vector that makes BFGS different form DFP method
+      
+    hessin += fac * xi * xi.t() - fad * hdg * hdg.t() + fae * dg * dg.t();
+ 	}
+    		
+	xi = -hessin * g;
+  return 0;   //minumum not found yet
+}
 
 template<class T>
 double Minimization::linmin(cv::Mat_<double>& p, cv::Mat_<double>& xi, T &func)

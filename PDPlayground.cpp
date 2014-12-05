@@ -40,8 +40,9 @@ int main()
 {
   try
   {
-    SubimageLayout subimageLayout;
-    subimageLayout.navigateThrough();
+    test_minimization();
+    //SubimageLayout subimageLayout;
+    //subimageLayout.navigateThrough();
   }
   catch (cv::Exception const & e)
   {

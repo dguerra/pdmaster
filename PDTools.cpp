@@ -283,17 +283,17 @@ unsigned int optimumSideLength(const unsigned int& minimumLength, const double& 
   return optimumLength;
 }
 
+cv::Mat centralROI(const cv::Mat& im, const cv::Size& roiSize, cv::Mat& roi)
+{
+  cv::Point roiPosition((im.cols/2)-(roiSize.width/2), (im.rows/2)-(roiSize.height/2));
+  //roi = im(cv::Rect(roiPosition, roiSize));
+  return im(cv::Rect(roiPosition, roiSize));
+}
+
 cv::Mat selectCentralROI(const cv::Mat& im, const cv::Size& roiSize)
 {
-//  if(im.cols == im.rows)
-//  {
-    cv::Point roiPosition((im.cols/2)-(roiSize.width/2), (im.rows/2)-(roiSize.height/2));
-    return im(cv::Rect(roiPosition, roiSize));
-//  }
-//  else
-//  {
-//    throw CustomException("selectCentralROI: Must have same number of rows and cols to extract central roi.");
-//  }
+  cv::Point roiPosition((im.cols/2)-(roiSize.width/2), (im.rows/2)-(roiSize.height/2));
+  return im(cv::Rect(roiPosition, roiSize));
 }
 
 cv::Mat takeoutImageCore(const cv::Mat& im, const unsigned int& imageCoreSize)
