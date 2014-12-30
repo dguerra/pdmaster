@@ -18,6 +18,8 @@
 //#include "ErrorMetric.h"
 #include "GetStep.h"
 #include "TelescopeSettings.h"
+#include "Metric.h"
+#include "Minimization.h"
 
 constexpr double PI = 2*acos(0.0);
 
@@ -60,14 +62,14 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   cv::Mat c = cv::Mat::zeros(14, 1, cv::DataType<double>::type);
   cv::Mat dc = cv::Mat::ones(c.size(), cv::DataType<double>::type);  //random initialization with rms greater than dcRMS_minimum
   cv::Mat zernikesInUse = cv::Mat::ones(c.size(), cv::DataType<bool>::type); //true where zernike index is used and false otherwise
- // zernikesInUse.at<bool>(0,0) = false;
- // zernikesInUse.at<bool>(0,1) = false;
- // zernikesInUse.at<bool>(0,2) = false;
+  //zernikesInUse.at<bool>(0,0) = false;
+  //zernikesInUse.at<bool>(0,1) = false;
+  //zernikesInUse.at<bool>(0,2) = false;
 
   cv::Mat alignmentSetup = cv::Mat::zeros(c.size(), cv::DataType<bool>::type); //true for piston and tip-tilt coeffcients only
- // alignmentSetup.at<bool>(0,0) = true;
- // alignmentSetup.at<bool>(0,1) = true;
- // alignmentSetup.at<bool>(0,2) = true;
+  //alignmentSetup.at<bool>(0,0) = true;
+  //alignmentSetup.at<bool>(0,1) = true;
+  //alignmentSetup.at<bool>(0,2) = true;
 
   unsigned int pupilSideLength = optimumSideLength(d_size.width/2, tsettings.pupilRadiousPixels());
   std::cout << "pupilSideLength: " << pupilSideLength << std::endl;
@@ -94,11 +96,69 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   }
   double pupilRadiousP = tsettings.pupilRadiousPixels();
   cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, pupilRadiousP);
-
+    
+  static bool done(false);
   double lmPrevious(0.0);
   //iterate through this loop until stable solution of zernike coefficients is found
   for (unsigned int iteration = 0; iteration < maximumIterations_; ++iteration)
   {
+      //little test to compare both old and new algorithms
+  if(!done)
+  {  //Check that every objectivefunction value fits the old algorithm
+    done = true;
+    Metric mm, mm_p;
+    std::vector<double> meanPowerNoise = {2.08519e-09, 1.9587e-09};    //sample case
+    std::vector<cv::Mat> zBase = Zernikes<double>::zernikeBase(c.total(), pupilSideLength, pupilRadiousP);
+    
+    Minimization minimizationKit;
+    
+    std::function<double(cv::Mat)> objFunction = std::bind(&Metric::objectiveFunction, &mm, std::placeholders::_1, D, zBase, meanPowerNoise);
+    
+    std::function<cv::Mat(cv::Mat)> gradFunction = std::bind(&Metric::gradient, &mm, std::placeholders::_1, D, zBase, meanPowerNoise);
+    
+    std::function<cv::Mat(cv::Mat)> dfuncc_diff = [objFunction] (cv::Mat x) -> cv::Mat
+    { //make up gradient vector through slopes and tiny differences
+      double EPS(1.0e-8);
+      cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+  	  cv::Mat xh = x.clone();
+  	  double fold = objFunction(x);
+      for(unsigned int j = 0; j < x.total(); ++j)
+      {
+        double temp = x.at<double>(j,0);
+        double h = EPS * std::abs(temp);
+        if (h == 0) h = EPS;
+        xh.at<double>(j,0) = temp + h;
+        h = xh.at<double>(j,0) - temp;
+        double fh = objFunction(xh);
+        xh.at<double>(j,0) = temp;
+        df.at<double>(j,0) = (fh-fold)/h;    
+      }
+      return df;  
+    };
+  
+    int M = zBase.size();
+    int K = D.size();
+    cv::Mat Q2 = cv::Mat::eye(M*K, M*K, cv::DataType<double>::type);
+    
+    //cv::vconcat(cv::Mat::eye(M, M, cv::DataType<double>::type), cv::Mat::eye(M, M, cv::DataType<double>::type), Q2);
+    //cv::multiply(Q2, 1.0/std::sqrt(2.0), Q2);
+    
+    //p: initial point; Q2: null space of constraints; objFunction: function to be minimized; gradFunction: first derivative of objFunction
+    cv::Mat p;
+    cv::vconcat(c.clone(), c.clone(), p);
+    p = cv::Mat::zeros(M*K, 1, cv::DataType<double>::type);
+    std::cout << "objFunction(p) = " << objFunction(p) << std::endl;
+    cv::Mat gF = gradFunction(p);
+    std::cout << "gradFunction(p) = " << gF.t() << std::endl;
+    cv::Mat dgF = dfuncc_diff(p);
+    std::cout << "dfuncc_diff(p) = " << dgF.t() << std::endl;
+    cv::Mat coc;
+    cv::divide(gF, dgF, coc);
+    std::cout << "coc: " << coc.t() << std::endl;
+    minimizationKit.minimize(p, Q2, objFunction, gradFunction);
+    std::cout << "mimumum: " << p.t() << std::endl;
+  }
+
 	  std::cout << "iteration: " << iteration << std::endl;
     int ret = getstep( c, D, diversityPhase, pupilAmplitude, pupilSideLength, zernikesInUse, alignmentSetup, zernikeCatalog,
     		               pupilRadiousP, meanPowerNoise, lmPrevious,

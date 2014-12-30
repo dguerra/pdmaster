@@ -31,6 +31,9 @@ void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, const std::vector<
   //check input dimensions
   if(coeffs.cols != 1) throw CustomException("Wrong input dimensions");
   
+  //Start populating vector from scratch
+  OS.clear();
+  
   TelescopeSettings tsettings(D.front().size().width);
   unsigned int pupilSideLength = optimumSideLength(D.front().size().width/2, tsettings.pupilRadiousPixels());
 
@@ -40,10 +43,23 @@ void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, const std::vector<
     
   cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
   
+  ////////Consider the case of two diversity images
+  std::vector<double> diversityFactor = {0.0, -2.21209};
+  cv::Mat z4 = Zernikes<double>::phaseMapZernike(4, pupilSideLength, tsettings.pupilRadiousPixels());
+  double z4AtOrigen = Zernikes<double>::pointZernike(4, 0, 0);
+  std::vector<cv::Mat> diversityPhase;
+  for(double dfactor : diversityFactor)
+  {
+    //defocus zernike coefficient: c4 = dfactor * PI/(2.0*std::sqrt(3.0))
+	  diversityPhase.push_back( (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen));
+  }
+  ////////
+  
+  
   for(unsigned int k=0; k<K; ++k)
   {  //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
     cv::Mat pupilPhase_i = Zernikes<double>::phaseMapZernikeSum(pupilSideLength,tsettings.pupilRadiousPixels(), coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
-    OS.push_back(OpticalSystem(pupilPhase_i, pupilAmplitude));  //Characterized optical system
+    OS.push_back(OpticalSystem(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
   }
    
 }
@@ -52,7 +68,7 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
                       const std::vector<double>& meanPowerNoise, std::vector<OpticalSystem>& OS, cv::Mat& Q)
 {
   //double gamma_obj(0.0);  //We are not going to consider this gamma value so we set to zero
-  if(OS.empty()) characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
+  characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
   //unsigned int K = OS.size();
   //unsigned int M = zernikeBase.size();
   
@@ -75,7 +91,7 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
 void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                             const std::vector<double>& meanPowerNoise, std::vector<OpticalSystem>& OS, cv::Mat& P)
 {
-  if(OS.empty()) characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
+  characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
   P = cv::Mat::zeros(D.front().size(), D.front().type());
 
   //P=accumulate over J { Dj * conj(Sj) } 
@@ -89,6 +105,8 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
     
     P += SjDj;
   }
+  TelescopeSettings tsettings(D.front().cols);
+  P.setTo(0, Zernikes<double>::phaseMapZernike(1, P.cols, tsettings.cutoffPixel()) == 0);
 }
 
 void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
@@ -96,10 +114,10 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
 {
   const double filter_upper_limit(1.0);
   const double filter_lower_limit(0.1);
-  if(P_.empty()) computeP(coeffs, D, zernikeBase, meanPowerNoise, OS_, P_);
+  computeP(coeffs, D, zernikeBase, meanPowerNoise, OS_, P_);
   cv::Mat absP = absComplex(P_);
   
-  if(Q_.empty()) computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS_, Q_);
+  computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS_, Q_);
   cv::Mat frac;
   cv::divide(Q_, absP.mul(absP), frac);  //Both Q and absP are single channel images, real matrices
   
@@ -151,22 +169,25 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
 double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                                   const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise )
 { 
-  if( coeffs_.empty() || !cv::checkRange(coeffs-coeffs_, true, nullptr, 0.0, 0.0) )
-  { //if a new set of coefficients are used, clean up quantities
-    P_.release();
-    Q_.release();
-    OS_.clear();
-  }
+  F_.release();   //Object estimate
+  L_ = 0.0;
+  g_.release();   //gradient vector at point "coeffs"
+  coeffs_.release();  //Coefficients ue
+  H_.release();   //noise filter, low-pass scharmer filter
   
-  coeffs.copyTo(coeffs_);
+  //Intermal metrics
+  Q_.release();
+  P_.release();
+  OS_.clear();
   
-  if(OS_.empty()) characterizeOpticalSystem(coeffs_, D, zernikeBase, OS_);
-  if(F_.empty()) objectEstimate(coeffs_, D, zernikeBase, meanPowerNoise);
-  if(H_.empty()) noiseFilter(coeffs_, D, zernikeBase, meanPowerNoise, H_);
-  if(P_.empty()) computeP(coeffs_, D, zernikeBase, meanPowerNoise, OS_, P_);
-  if(Q_.empty()) computeQ(coeffs_, D, zernikeBase, meanPowerNoise, OS_, Q_);
+  characterizeOpticalSystem(coeffs, D, zernikeBase, OS_);
+  objectEstimate(coeffs, D, zernikeBase, meanPowerNoise);
+  noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, H_);
+  computeP(coeffs, D, zernikeBase, meanPowerNoise, OS_, P_);
+  computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS_, Q_);
+ 
   
-  if(false)
+  if(true)
   {
     /////Create L = sum{ abs(D0H - FHT0)^2 + abs(DkH - FHTk)^2 }
     cv::Mat accDiff = cv::Mat::zeros(F_.size(), F_.depth());
@@ -177,15 +198,18 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
       cv::Mat FHSj;
       cv::Mat Sj = OS_.at(k).otf();
       shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
+      TelescopeSettings tsettings(D.front().cols);
+      Sj.setTo(0, Zernikes<double>::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
       cv::mulSpectrums(F_, selectCentralROI(Sj, F_.size()), FHSj, cv::DFT_COMPLEX_OUTPUT);
       cv::accumulateSquare(absComplex(DjH - FHSj), accDiff);
     }
  
     L_ = cv::sum(accDiff).val[0];
-    std::cout << "L value from diff: " << L_ << std::endl;   //8.24441e-05
+    //std::cout << "L value from diff: " << L_ << std::endl;   //8.24441e-05
   }
 
-  
+  if(false)
+  {
   cv::Mat absP = absComplex(P_);
   cv::Mat frac, accDjH = cv::Mat::zeros(Q_.size(), Q_.type());
   
@@ -202,6 +226,8 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
   
   L_ = cv::sum(accDjH - frac).val[0];
   std::cout << "L value from eq: " << L_ << std::endl;
+  }
+  
   return L_;
   
 }
@@ -209,124 +235,101 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
 void Metric::objectEstimate(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                             const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise)
 {
-  if( coeffs_.empty() || !cv::checkRange(coeffs-coeffs_, true, nullptr, 0.0, 0.0) )
-  { //if a new set of coefficients are used, clean up quantities
-    P_.release();
-    Q_.release();
-    OS_.clear();
-  }
-  
-  coeffs.copyTo(coeffs_);
-  if(P_.empty()) computeP(coeffs_, D, zernikeBase, meanPowerNoise, OS_, P_);
-  if(Q_.empty()) computeQ(coeffs_, D, zernikeBase, meanPowerNoise, OS_, Q_);
+  computeP(coeffs, D, zernikeBase, meanPowerNoise, OS_, P_);
+  computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS_, Q_);
   cv::Mat Q_1;  //Inverse of every element of Q_
   cv::pow(Q_, -1, Q_1);
   cv::mulSpectrums(makeComplex(Q_1), P_, F_, cv::DFT_COMPLEX_OUTPUT);
   
   //Filter the result out
-  if(H_.empty()) noiseFilter(coeffs_, D, zernikeBase, meanPowerNoise, H_);
+  if(H_.empty()) noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, H_);
   cv::mulSpectrums(F_, makeComplex(H_), F_, cv::DFT_COMPLEX_OUTPUT);
-  //std::cout << "filter.new.(80,80): " <<  H_.at<double>(80,80) << std::endl;
 }
   
-  
-cv::Mat Metric::finiteDifferencesGradient(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
-                               const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise)
-{
-  double EPS(1.0e-8);
-	cv::Mat xh = coeffs.clone();
-	double fold = objectiveFunction(coeffs, D, zernikeBase, meanPowerNoise);
-  
-  cv::Mat temp = coeffs.clone();
-  cv::Mat h = EPS * cv::abs(temp);
-  h.setTo(EPS, h == 0.0);
-  xh = temp + h;
-  h = xh - temp;
-  double fh = objectiveFunction(xh, D, zernikeBase, meanPowerNoise);
-  xh = temp.clone();
-  cv::Mat df;
-  cv::divide((fh - fold), h, df);
-  
-  return df;
-}
-
 
 cv::Mat Metric::gradient(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                          const std::vector<double>& meanPowerNoise)
 {
-  if( coeffs_.empty() || !cv::checkRange(coeffs-coeffs_, true, nullptr, 0.0, 0.0) )
-  {
-    //if a new set of coefficients are used, clean up quantities
-    P_.release();
-    Q_.release();
-    OS_.clear();
-  }
-  coeffs.copyTo(coeffs_);
+  F_.release();   //Object estimate
+  L_ = 0.0;
+  g_.release();   //gradient vector at point "coeffs"
+  coeffs_.release();  //Coefficients ue
+  H_.release();   //noise filter, low-pass scharmer filter
+  
+  //Intermal metrics
+  Q_.release();
+  P_.release();
+  OS_.clear();
+  
   
   /////////////////////////////////////////////////
   //Compute gradient vector, g, with N = K*M elements
-  if(F_.empty()) objectEstimate(coeffs, D, zernikeBase, meanPowerNoise);
-  if(P_.empty()) computeP(coeffs_, D, zernikeBase, meanPowerNoise, OS_, P_);
+  //objectEstimate(coeffs, D, zernikeBase, meanPowerNoise);
+  //
+  computeP(coeffs, D, zernikeBase, meanPowerNoise, OS_, P_);
+  computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS_, Q_);
+  objectEstimate(coeffs, D, zernikeBase, meanPowerNoise);
   
   unsigned int J = OS_.size();
   unsigned int M = zernikeBase.size();
   
   g_ = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
-
+  static int i(0);
+  
+  //writeFITS(zernikeBase.at(0), "z0_" + std::to_string(i) + ".fits");
+  
   for(unsigned int j = 0; j < J; ++j)
   {
-    cv::Mat Pj, pj, FDj, F2Sj, re, pjre, pjre_f, term;
-
-    Pj = OS_.at(j).generalizedPupilFunction();
+    cv::Mat Pj = OS_.at(j).generalizedPupilFunction();
     
     cv::Mat Pj_pad = cv::Mat::zeros(D.front().size(), Pj.type());
     Pj.copyTo(selectCentralROI(Pj_pad, Pj.size()));
-    std::cout << "Pj_pad.at<std::complex<double> >(50,50) before norm: " << Pj_pad.at<std::complex<double> >(50,50) << std::endl;
-
-    cv::Mat normFactor;
-    cv::resize(OS_.at(j).otfNormalizationFactor(), normFactor, Pj_pad.size());
-    Pj_pad = divComplex(Pj_pad, normFactor);
+      
+//    shift(Pj_pad, Pj_pad, Pj_pad.cols/2, Pj_pad.rows/2);
+//    normComplex(Pj_pad, Pj_pad);
+//    shift(Pj_pad, Pj_pad, Pj_pad.cols/2, Pj_pad.rows/2);
+//      cv::Mat normFactor;
+//      cv::resize(OS_.at(j).otfNormalizationFactor(), normFactor, Pj_pad.size());
+//      Pj_pad = divComplex(Pj_pad, normFactor);
     
-    std::cout << "Pj_pad.at<std::complex<double> >(50,50) after norm: " << Pj_pad.at<std::complex<double> >(50,50) << std::endl;
     //!!¡¡When multiply by conjuagte, use mulSpectrums(A, B, out, cv::DFT_COMPLEX_OUTPUT, true);
     //square of absolute value of z is: |z|^2 = z * conj(z)
     
     cv::Mat pj_pad = Pj_pad.clone();
     shift(pj_pad, pj_pad, pj_pad.cols/2, pj_pad.rows/2);
-    cv::idft(pj_pad, pj_pad, cv::DFT_REAL_OUTPUT);
     
+    cv::idft(pj_pad, pj_pad, cv::DFT_COMPLEX_OUTPUT);  //Usually it's cv::DFT_REAL_OUTPUT with idft
     
-    cv::Mat abs2P, abs2PSj;
     bool conjB(true);
-    
-    cv::mulSpectrums(P_, P_, abs2P, cv::DFT_COMPLEX_OUTPUT, conjB);
-    cv::Mat Sj = OS_.at(j).otf();
-    shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
-   
-    cv::mulSpectrums(abs2P, selectCentralROI(Sj, abs2P.size()), abs2PSj, cv::DFT_COMPLEX_OUTPUT);
-    
-    cv::Mat PQ, PQDj;
-    std::cout << "hell" << std::endl;
-    cv::mulSpectrums(makeComplex(Q_), P_, PQ, cv::DFT_COMPLEX_OUTPUT, conjB);    //conjP because we define P the other way around
-    cv::mulSpectrums(PQ, D.at(j), PQDj, cv::DFT_COMPLEX_OUTPUT); 
-    
-    cv::Mat Q2 = Q_.mul(Q_);
     cv::Mat gl, pjgl;
     
-    cv::mulSpectrums(PQDj-abs2PSj, makeComplex(1.0/Q2), gl, cv::DFT_COMPLEX_OUTPUT);
+    cv::Mat FDj;
+    cv::mulSpectrums(D.at(j),F_, FDj, cv::DFT_COMPLEX_OUTPUT, conjB);
+    cv::Mat Sj = OS_.at(j).otf();
+    shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
+    TelescopeSettings tsettings(D.front().cols);
+    Sj.setTo(0, Zernikes<double>::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
     
+    cv::Mat abs2F, abs2FSj;
+    cv::mulSpectrums(F_, F_, abs2F, cv::DFT_COMPLEX_OUTPUT, conjB);
+    cv::mulSpectrums(abs2F, selectCentralROI(Sj, abs2F.size()), abs2FSj, cv::DFT_COMPLEX_OUTPUT);
+    gl = FDj - abs2FSj;
+
     shift(gl, gl, gl.cols/2, gl.rows/2);
-    cv::idft(gl, gl, cv::DFT_REAL_OUTPUT);
+    cv::idft(gl, gl, cv::DFT_COMPLEX_OUTPUT);    //Usually it's cv::DFT_REAL_OUTPUT with idft
+    cv::mulSpectrums(makeComplex(splitComplex(gl).first), pj_pad, pjgl, cv::DFT_COMPLEX_OUTPUT);
     
-    cv::multiply(gl, pj_pad, pjgl);
     
     cv::dft(pjgl, pjgl, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
     shift(pjgl, pjgl, pjgl.cols/2, pjgl.rows/2);
     
     cv::Mat Pjpjgl;
     cv::mulSpectrums(pjgl, Pj_pad, Pjpjgl, cv::DFT_COMPLEX_OUTPUT, conjB);
-    cv::Mat grad = -2 * std::sqrt(J) * splitComplex(Pjpjgl).second;
-                     
+    
+
+    cv::Mat grad = -2 * splitComplex(Pjpjgl).second;
+
+  
     for(unsigned int m = 0; m < M; ++m)
     {
       cv::Mat zBase = cv::Mat::zeros(D.front().size(), zernikeBase.at(m).type());
@@ -334,16 +337,47 @@ cv::Mat Metric::gradient(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, c
       
       if(!zernikeBase.at(m).empty())
       {
-        g_.at<double>((j * M) + m, 0) = grad.dot(zBase);
+        g_.at<double>((j * M) + m , 0) = grad.dot(zBase);
       }
       else
       {
         g_.at<double>((j * M) + m, 0) = 0.0;
       }
     }
+    
+    i++;
    
   }
+  //TelescopeSettings tsettings(D.front().cols);
+  //double area = cv::countNonZero(Zernikes<double>::phaseMapZernike(1, D.front().cols, tsettings.pupilRadiousPixels()));
+  //std::cout << "area: " << area << std::endl;
+  //std::cout << "total: " << zernikeBase.front().total() << std::endl;
+  g_ = g_/zernikeBase.front().total();
+  g_ = g_ / 0.35;
  
   return g_;
-
 }
+
+/*      
+    cv::Mat abs2P, abs2PSj;
+    cv::mulSpectrums(P_, P_, abs2P, cv::DFT_COMPLEX_OUTPUT, conjB);
+ 
+    
+    cv::Mat Sj = OS_.at(j).otf();
+    shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
+   
+    
+    cv::mulSpectrums(abs2P, selectCentralROI(Sj, abs2P.size()), abs2PSj, cv::DFT_COMPLEX_OUTPUT);
+    
+    cv::Mat PQ, PQDj;
+
+    cv::mulSpectrums(makeComplex(Q_), P_, PQ, cv::DFT_COMPLEX_OUTPUT, conjB);    //conjP because we define P the other way around
+    
+    cv::mulSpectrums(PQ, D.at(j), PQDj, cv::DFT_COMPLEX_OUTPUT); 
+    cv::Mat Q2;
+    cv::multiply(Q_, Q_, Q2);
+    cv::Mat PQDjabs2PSj = PQDj-abs2PSj;
+    
+    cv::mulSpectrums(PQDjabs2PSj, makeComplex(1.0/Q2), gl, cv::DFT_COMPLEX_OUTPUT);
+*/    
+

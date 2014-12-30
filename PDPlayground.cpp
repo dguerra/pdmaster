@@ -6,32 +6,12 @@
 // Description : Hello World in C++, Ansi-style
 //============================================================================
 
-#include <iostream>
-#include <functional>   // std::minus
-#include <numeric>      // std::accumulate
-#include <math.h>
-#include <tuple>
-#include <string>
-#include <vector>
-#include <limits>
-#include <complex>
-#include <algorithm>
-#include "Zernikes.h"
-#include "NoiseEstimator.h"
-#include "WaveletTransform.h"
-#include "PDTools.h"
-#include "Optimization.h"
-#include "OpticalSystem.h"
-#include "ErrorMetric.h"
-#include "opencv2/opencv.hpp"
 #include "TestRoom.h"
-#include "TelescopeSettings.h"
-#include "WavefrontSensor.h"
-#include "FITS.h"
 #include "SubimageLayout.h"
-#include "AWMLE.h"
+#include "FITS.h"
 #include "Minimization.h"
-
+#include "MOMFBD.h"
+#include "PDTools.h"
 #include <chrono>
 
 //to compare the results mean squared error (MSE) and the structural similarity index (SSIM)
@@ -40,9 +20,8 @@ int main()
 {
   try
   {
-    test_minimization();
-    //SubimageLayout subimageLayout;
-    //subimageLayout.navigateThrough();
+    SubimageLayout subimageLayout;
+    subimageLayout.navigateThrough();
   }
   catch (cv::Exception const & e)
   {

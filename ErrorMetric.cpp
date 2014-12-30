@@ -80,6 +80,7 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
   cv::Mat accDiff = abs0.mul(abs0) + absk.mul(absk);
   std::cout << "L value old from diff: " << cv::sum(accDiff).val[0] << std::endl;
   
+  
   /////Create L = sum{ abs(E)^2 }
   cv::Mat EH;
   cv::mulSpectrums(E_, noiseFilter_, EH, cv::DFT_COMPLEX_OUTPUT);
@@ -91,20 +92,6 @@ ErrorMetric::ErrorMetric( const OpticalSystem& focusedOS, const OpticalSystem& d
   compute_dTdc_(defocusedOS, zernikeCatalog, zernikesInUse, dTkdc_);
 
   std::vector<cv::Mat> dT0dc_cropped, dTkdc_cropped;
-
-/*
-  auto shiftAndCrop = [&] (const cv::Mat& src) -> cv::Mat
-  {
-    cv::Mat dst;
-    if(!src.empty())
-    {
-      cv::Mat srcShift(src);
-      shift(srcShift, srcShift, srcShift.cols/2, srcShift.rows/2);
-      cv::Mat dst = takeoutImageCore(srcShift, D0.cols);
-    }
-    return dst;
-  };
-*/
 
   for(cv::Mat dT0dci : dT0dc_)
   {

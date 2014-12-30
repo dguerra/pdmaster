@@ -23,42 +23,6 @@
 #include "ImageQualityMetric.h"
 #include "Minimization.h"
 
-struct F_constrained
-{
-  double operator()(cv::Mat_<double> x__)
-  {
-    double q2[] = {-0.89442719, 0.4472136};    //solution subject to x+2y=0
-    cv::Mat_<double> q2_constraints_ = cv::Mat(2, 1, cv::DataType<double>::type, q2);
- 
-    cv::Mat_<double> x = q2_constraints_ * x__;
-    //Eq to minimize: x^8-3*(x+3)^5+5+(y+4)^6+y^5
-    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
-           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5);
-  }
-};
-
-
-struct DF_constrained
-{
-  cv::Mat_<double> operator()(cv::Mat_<double> x__)
-  {
-    double q2[] = {-0.89442719, 0.4472136};    //solution subject to x+2y=0
-    cv::Mat_<double> q2_constraints_ = cv::Mat(2, 1, cv::DataType<double>::type, q2);
-    
-    cv::Mat_<double> x = q2_constraints_ * x__;
-    
-    cv::Mat_<double> z(2,1);  //Size(2,1)->1 row, 2 colums
-    z.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
-                            std::pow(x.at<double>(0,0)+3,4);
-    z.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
-                            std::pow(x.at<double>(1,0)+4,5);
-    
-    return q2_constraints_.t() * z;
-  }
-};
-
-
-
 
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
@@ -80,22 +44,59 @@ bool test_minimization()
 {
  
   Minimization mm;
-  //cv::Mat_<double> p = cv::Mat::zeros(1,1,cv::DataType<double>::type);
+  
+  //write in wolfram alpha the following to verify: "minimize{x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z^2} in x+2*y+3*z=0"
      
-  int iter;
-  double fret;
+  double q2[] = {-0.53452248, -0.80178373, 0.77454192, -0.33818712,  -0.33818712,  0.49271932};    //null space of constraints: subject to x+2y+3z=0
+  cv::Mat Q2 = cv::Mat(3, 2, cv::DataType<double>::type, q2);
   
-  F_constrained f_constrained;
-  DF_constrained df_constrained;
+  std::function<double(cv::Mat)> funcc = [] (cv::Mat x) -> double 
+  {//Eq to minimize: x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z
+    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
+           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5) + 3 * std::pow(x.at<double>(2,0),2);
+  };
   
-  cv::Mat_<double> p = cv::Mat::zeros(1,1,cv::DataType<double>::type);
-  mm.dfpmin(p, iter, fret, f_constrained, df_constrained);
+  std::function<cv::Mat(cv::Mat)> dfuncc_diff = [funcc] (cv::Mat x) -> cv::Mat
+  { //make up gradient vector through slopes and tiny differences
+    double EPS(1.0e-8);
+    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+  	cv::Mat xh = x.clone();
+	  double fold = funcc(x);
+    for(unsigned int j = 0; j < x.total(); ++j)
+    {
+      double temp = x.at<double>(j,0);
+      double h = EPS * std::abs(temp);
+      if (h == 0) h = EPS;
+      xh.at<double>(j,0) = temp + h;
+      
+      h = xh.at<double>(j,0) - temp;
+      double fh = funcc(xh);
+      xh.at<double>(j,0) = temp;
+      df.at<double>(j,0) = (fh-fold)/h;    
+    }
+    return df;
     
-  double q2[] = {-0.89442719, 0.4472136};    //solution subject to x+2y=0
-  cv::Mat_<double> Q2 = cv::Mat(2, 1, cv::DataType<double>::type, q2);
+  };
   
-  std::cout << "fret: " << fret << std::endl;
-  std::cout << "p " << Q2*p << std::endl;
+  
+  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat x) -> cv::Mat
+  { //Gradient vector function: function derivative with every variable
+    cv::Mat t(3,1, cv::DataType<double>::type);  //Size(3,1)->1 row, 2 colums
+    t.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
+                            std::pow(x.at<double>(0,0)+3,4);
+    t.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
+                            std::pow(x.at<double>(1,0)+4,5);
+    t.at<double>(2,0) = 6 * x.at<double>(2,0);
+    return t;
+  };
+ 
+  
+  cv::Mat p = cv::Mat::zeros(3, 1, cv::DataType<double>::type);
+  mm.minimize(p, Q2, funcc, dfuncc_diff);
+  
+  std::cout << "p " << p << std::endl;
+  std::cout << "fret " << mm.fret() << std::endl;
+  
   return true;
 }
 
