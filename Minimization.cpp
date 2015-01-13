@@ -8,6 +8,29 @@
 #include "Minimization.h"
 
 
+//ANEXO:
+  //in case gradient function is not available, it could be build with a difference approximation
+  //    std::function<cv::Mat(cv::Mat)> dfuncc_diff = [objFunction] (cv::Mat x) -> cv::Mat
+//    { //make up gradient vector through slopes and tiny differences
+//      double EPS(1.0e-8);
+//      cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+//  	  cv::Mat xh = x.clone();
+//  	  double fold = objFunction(x);
+//      for(unsigned int j = 0; j < x.total(); ++j)
+//      {
+//        double temp = x.at<double>(j,0);
+//        double h = EPS * std::abs(temp);
+//        if (h == 0) h = EPS;
+//        xh.at<double>(j,0) = temp + h;
+//        h = xh.at<double>(j,0) - temp;
+//        double fh = objFunction(xh);
+//        xh.at<double>(j,0) = temp;
+//        df.at<double>(j,0) = (fh-fold)/h;    
+//      }
+//      return df;  
+//    };
+    
+
 Minimization::Minimization()
 {
   // TODO Auto-generated constructor stub
@@ -33,7 +56,6 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
   {
     return Q2.t() * dfunc(Q2*x);
   };
-
   
   std::function<double(cv::Mat)> f_constrained = std::bind(F_constrained, std::placeholders::_1, func, Q2);
   std::function<cv::Mat(cv::Mat)> df_constrained = std::bind(DF_constrained, std::placeholders::_1, dfunc, Q2);

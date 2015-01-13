@@ -9,6 +9,7 @@
 #include "TelescopeSettings.h"
 #include "CustomException.h"
 #include "Zernikes.h"
+#include "Zernikes.cpp"
 #include "FITS.h"
 
 
@@ -80,6 +81,7 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
     shift(absSj, absSj, absSj.cols/2, absSj.rows/2);
    
     //in case of undersampling optimumSideLength is bigger then image size
+    
     cv::accumulateSquare(selectCentralROI(absSj, D.front().size()), Q);
     //Q += absSj.mul(absSj);
   }
@@ -94,14 +96,15 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
   characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
   P = cv::Mat::zeros(D.front().size(), D.front().type());
 
-  //P=accumulate over J { Dj * conj(Sj) } 
+  //P = accumulate over J { Dj * conj(Sj) } 
   for(unsigned int k = 0; k < D.size(); ++k)
   {
     cv::Mat SjDj;
-    cv::Mat conjSj = conjComplex(OS.at(k).otf());
-    shift(conjSj, conjSj, conjSj.cols/2, conjSj.rows/2);
-    cv::mulSpectrums(selectCentralROI(conjSj, D.front().size()), 
-                     D.at(k), SjDj, cv::DFT_COMPLEX_OUTPUT);
+    cv::Mat Sj = OS.at(k).otf();
+    shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
+    bool conjB(true);
+    
+    cv::mulSpectrums(D.at(k), selectCentralROI(Sj, D.front().size()), SjDj, cv::DFT_COMPLEX_OUTPUT, conjB);
     
     P += SjDj;
   }
@@ -205,7 +208,7 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
     }
  
     L_ = cv::sum(accDiff).val[0];
-    //std::cout << "L value from diff: " << L_ << std::endl;   //8.24441e-05
+    std::cout << "L value from diff: " << L_ << std::endl;   //8.24441e-05
   }
 
   if(false)
@@ -357,27 +360,4 @@ cv::Mat Metric::gradient(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, c
  
   return g_;
 }
-
-/*      
-    cv::Mat abs2P, abs2PSj;
-    cv::mulSpectrums(P_, P_, abs2P, cv::DFT_COMPLEX_OUTPUT, conjB);
- 
-    
-    cv::Mat Sj = OS_.at(j).otf();
-    shift(Sj, Sj, Sj.cols/2, Sj.rows/2);
-   
-    
-    cv::mulSpectrums(abs2P, selectCentralROI(Sj, abs2P.size()), abs2PSj, cv::DFT_COMPLEX_OUTPUT);
-    
-    cv::Mat PQ, PQDj;
-
-    cv::mulSpectrums(makeComplex(Q_), P_, PQ, cv::DFT_COMPLEX_OUTPUT, conjB);    //conjP because we define P the other way around
-    
-    cv::mulSpectrums(PQ, D.at(j), PQDj, cv::DFT_COMPLEX_OUTPUT); 
-    cv::Mat Q2;
-    cv::multiply(Q_, Q_, Q2);
-    cv::Mat PQDjabs2PSj = PQDj-abs2PSj;
-    
-    cv::mulSpectrums(PQDjabs2PSj, makeComplex(1.0/Q2), gl, cv::DFT_COMPLEX_OUTPUT);
-*/    
 

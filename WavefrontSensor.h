@@ -19,20 +19,10 @@ class WavefrontSensor
 public:
   WavefrontSensor();
   virtual ~WavefrontSensor();
-  void createModifiedHanningWindow(cv::Mat& modifiedHanningWindow,
-      const int& sideLength, const double& apodizedAreaPercent, int datatype);
   cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise);
+  void householder(const cv::Mat &m, cv::Mat &R, cv::Mat &Q);
 private:
-  //void showRestore(ErrorMetric errMet, cv::Mat& fm);
-
-  unsigned int maximumIterations_;
-  cv::Mat c_InitialValues;    //Initial values for zernike coefficients, they are zero by default
-
-  cv::Mat cMinimum_;
-  double lmMinimum_;
-  unsigned int iterationMinimum_;
   std::vector<double> diversityFactor_;
-  //cv::Mat zernikesInUse_;
 
 };
 #endif /* WAVEFRONTSENSOR_H_ */

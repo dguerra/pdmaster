@@ -15,7 +15,6 @@
 #include "Zernikes.h"
 #include "Zernikes.cpp"
 #include "NoiseEstimator.h"
-#include "ErrorMetric.h"
 #include "OpticalSystem.h"
 #include "WaveletTransform.h"
 #include "FITS.h"

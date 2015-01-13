@@ -1,5 +1,5 @@
 //============================================================================
-// Name        : PDPlayground.cpp
+// Name        : PDMain.cpp
 // Author      : Dailos
 // Version     :
 // Copyright   : Your copyright notice
@@ -10,7 +10,7 @@
 #include "SubimageLayout.h"
 #include "FITS.h"
 #include "Minimization.h"
-#include "MOMFBD.h"
+#include "Metric.h"
 #include "PDTools.h"
 #include <chrono>
 
