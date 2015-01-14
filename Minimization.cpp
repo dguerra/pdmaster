@@ -97,7 +97,8 @@ int Minimization::nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, cv::Mat &hessin,
                            std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
 {
 	const double EPS = std::numeric_limits<double>::epsilon();
-	const double TOLX = 4 * EPS;
+	//const double TOLX = 4 * EPS;
+	const double TOLX = 3.0e-8;
   double den, fac, fad, fae, sumdg, sumxi;
   cv::Mat dg, hdg;
   //we use linmin uses brent method inside to look for the minimum in 1D
