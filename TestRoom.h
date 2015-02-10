@@ -13,6 +13,7 @@ template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize);
 void test_noiseFilter();
 void test_generizedPupilFunctionVsOTF();
+void test_udwd_spectrums();
 void test_zernike_wavelets_decomposition();
 void test_wavelet_zernikes_decomposition();
 void test_getNM();

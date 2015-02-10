@@ -7,6 +7,7 @@ CPP_SRCS += \
 ../AWMLE.cpp \
 ../EffectivePixel.cpp \
 ../FITS.cpp \
+../Fusion.cpp \
 ../ImageQualityMetric.cpp \
 ../Minimization.cpp \
 ../Metric.cpp \
@@ -26,6 +27,7 @@ OBJS += \
 ./src/AWMLE.o \
 ./src/EffectivePixel.o \
 ./src/FITS.o \
+./src/Fusion.o \
 ./src/ImageQualityMetric.o \
 ./src/Minimization.o \
 ./src/Metric.o \
@@ -45,6 +47,7 @@ CPP_DEPS += \
 ./src/AWMLE.d \
 ./src/EffectivePixel.d \
 ./src/FITS.d \
+./src/Fusion.d \
 ./src/ImageQualityMetric.d \
 ./src/Minimization.d \
 ./src/Metric.d \

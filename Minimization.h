@@ -9,11 +9,6 @@
 #define MINIMIZATION_H_
 
 #include <iostream>
-#include <vector>
-#include <limits>  //numeric_limit<double>::epsilon
-#include <algorithm>    // std::max
-#include <cmath>   //std::abs
-#include <functional>   //function objects
 #include "opencv2/opencv.hpp"
 #include "CustomException.h"
 
@@ -51,7 +46,6 @@ public:
  
   void minimize(cv::Mat &p, const cv::Mat &Q2,
                 const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc);
-  
   
 private:
   int iter_;   //total number of iterations to get to the mininum

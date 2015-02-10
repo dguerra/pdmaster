@@ -18,9 +18,9 @@
 #include "OpticalSystem.h"
 #include "WaveletTransform.h"
 #include "FITS.h"
-#include "AWMLE.h"
+//#include "AWMLE.h"
 #include "ImageQualityMetric.h"
-#include "Minimization.h"
+//#include "Minimization.h"
 
 
 template<class T>
@@ -39,6 +39,46 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
   return A;
 }
 
+
+void test_udwd_spectrums()
+{
+  cv::Mat dat, input;
+  readFITS("../inputs/pd.004.fits", dat);
+  dat.convertTo(input, cv::DataType<double>::type);
+  
+  cv::Mat in = input(cv::Rect(cv::Point(0,0), cv::Size(450,450))).clone();
+  if(! in.data )                              // Check for invalid input
+  {
+    cout <<  "Could not open or find the image" << std::endl ;
+    //return -1;
+  }
+  std::vector<cv::Mat> output;
+  cv::Mat residu;
+  cv::Mat in_spec;
+  
+  cv::dft(in, in_spec, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+//  fftShift(in_spec);
+  
+  swtSpectrums(in_spec, output, residu, 7);
+  
+  cv::Mat wSum = cv::Mat::zeros(output.back().size(), output.back().type());
+  cv::Mat o_tmp;
+  for(cv::Mat it : output)
+  {
+    wSum += it;
+  }
+
+  wSum = wSum + residu;
+  cv::Mat wSum_measure;
+//  fftShift(wSum);
+  cv::idft(wSum, wSum_measure, cv::DFT_REAL_OUTPUT); 
+    
+  cv::Mat diff = in - wSum_measure;
+  writeFITS(wSum_measure, "../d1.fits");
+  std::cout << "Energy difference: " << std::sqrt(cv::sum(diff.mul(diff)).val[0]) << std::endl;  
+}
+
+/*
 bool test_minimization()
 {
  
@@ -99,7 +139,8 @@ bool test_minimization()
   return true;
 }
 
-/*
+
+
 void test_generizedPupilFunctionVsOTF()
 {
   double diversityFactor_ = -2.21209;

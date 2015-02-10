@@ -19,6 +19,7 @@ public:
   virtual ~SubimageLayout();
   void navigateThrough();
   void createModifiedHanningWindow(cv::Mat& modifiedHanningWindow, const int& sideLength, const double& apodizedAreaPercent, int datatype);
+  void computerGeneratedImage();
 //  bool subimageQueueIsEmpty(){return subimageQueue_.empty();};
 //  cv::Mat nextSubimage(){return subimageQueue_.pop_front();};
 

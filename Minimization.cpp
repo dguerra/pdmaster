@@ -5,8 +5,12 @@
  *      Author: dailos
  */
 
-#include "Minimization.h"
+#include <limits>  //numeric_limit<double>::epsilon
+#include <algorithm>    // std::max
+#include <cmath>   //std::abs
+#include <functional>   //function objects
 
+#include "Minimization.h"
 
 //ANEXO:
   //in case gradient function is not available, it could be build with a difference approximation
@@ -46,6 +50,7 @@ Minimization::~Minimization()
 void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
                             const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc)
 {
+ /* 
   //Lambda function that turn minimize function + constraints problem into minimize function lower dimension problem
   auto F_constrained = [] (cv::Mat x, std::function<double(cv::Mat)> func, const cv::Mat& Q2) -> double
   {
@@ -63,7 +68,9 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
   cv::Mat p_constrained = Q2.t() * p;
   
   dfpmin(p_constrained, iter_, fret_, f_constrained, df_constrained);
-  p = Q2 * p_constrained;   //Go back to original dimensional space
+  p = Q2 * p_constrained;   //Go back to original dimensional 
+  */
+  std::cout << "Not implemented here." << std::cout;
 }
 
 

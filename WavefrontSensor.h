@@ -20,7 +20,7 @@ public:
   WavefrontSensor();
   virtual ~WavefrontSensor();
   cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise);
-  void householder(const cv::Mat &m, cv::Mat &R, cv::Mat &Q);
+  
 private:
   std::vector<double> diversityFactor_;
 

@@ -29,12 +29,14 @@ void OpticalSystem::compute_OTF_(const cv::Mat& phase, const cv::Mat& amplitude,
   //amplitude: mask defining the pupil
   //phase: aberration fase for the image
   //Consider case with only real values (only one channel)
+  
   if (phase.channels() == 1 && amplitude.channels() == 1 && phase.size() == amplitude.size() && phase.type() == amplitude.type())
   {
     compute_GeneralizedPupilFunction_(phase, amplitude, generalizedPupilFunction_);
     cv::Mat unnormalizedOTF = crosscorrelation(generalizedPupilFunction_, generalizedPupilFunction_);
     //Normalize to be have 1 at oringen of the otf
-    otfNormalizationFactor_ = normComplex(unnormalizedOTF, otf);
+    cv::Mat otfNormalizationFactor_ = cv::repeat(unnormalizedOTF.col(0).row(0), unnormalizedOTF.rows, unnormalizedOTF.cols);
+    divSpectrums(unnormalizedOTF, otfNormalizationFactor_, otf, cv::DFT_COMPLEX_OUTPUT);
   }
   else
   {
@@ -59,7 +61,7 @@ void OpticalSystem::compute_GeneralizedPupilFunction_(const cv::Mat& phase, cons
       itSin++;
       itCos++;
     }
-
+    
     cv::mulSpectrums(makeComplex(amplitude), makeComplex(cosPhase, sinPhase),generalizedPupilFunction,cv::DFT_COMPLEX_OUTPUT);
   }
   else

@@ -22,6 +22,86 @@ cv::Mat conjComplex(const cv::Mat& A)
   }
 }
 
+void partlyKnownDifferencesInPhaseConstraints(int M, int K, cv::Mat& Q2)
+{
+  //constraints equation: PartlyKnownDifferencesInPhase
+  cv::Mat ce = cv::Mat::eye(M, M, cv::DataType<double>::type);
+  for(int i = 1; i < K-1; ++i)
+  {
+    cv::vconcat(ce, cv::Mat::eye(M, M, cv::DataType<double>::type), ce);
+  }
+  
+  cv::hconcat(ce, -1 * cv::Mat::eye((K-1)*M, (K-1)*M, cv::DataType<double>::type), ce);
+  ce.row(0) = cv::abs(ce.row(0));
+  ce.row(1) = cv::abs(ce.row(1));
+  ce.row(2) = cv::abs(ce.row(2));
+  
+  cv::Mat Q, R;
+  
+  householder(ce.t(), Q, R);
+  // extracts A columns, 1 (inclusive) to 3 (exclusive).
+  //Mat B = A(Range::all(), Range(1, 3));
+  //Select last Np colums of Q to become the constraints null space
+  int Np = (M*K) - ce.rows;
+  Q2 = Q(cv::Range::all(), cv::Range(Q.cols - Np, Q.cols ));
+}
+
+void householder(const cv::Mat &m, cv::Mat &Q, cv::Mat &R)
+{
+  if(m.cols>m.rows) throw CustomException("Assertion failed: cols<rows for QR decomposition");
+  auto matrix_minor = [](cv::Mat x, int d) -> cv::Mat
+  { //For d = 2, turns this into this:
+    // 5, 5, 5, 5, 5      1, 0, 0, 0, 0
+    // 5, 5, 5, 5, 5      0, 1, 0, 0, 0
+    // 5, 5, 5, 5, 5  ->  0, 0, 5, 5, 5
+    // 5, 5, 5, 5, 5      0, 0, 5, 5, 5
+    // 5, 5, 5, 5, 5      0, 0, 5, 5, 5
+  	cv::Mat m = cv::Mat::eye(x.size(), x.type());
+  	for (int i = d; i < x.rows; i++)
+    {
+		  for (int j = d; j < x.cols; j++)
+      {
+	  		m.at<double>(i,j) = x.at<double>(i,j);
+      }
+    }
+  
+	  return m;
+  };
+
+  
+	std::vector<cv::Mat> q;
+	cv::Mat z = m.clone(), z1;
+  
+	for (int k = 0; k < m.cols && k < m.rows - 1; k++) 
+  {
+		cv::Mat e = cv::Mat::zeros(m.rows, 1, m.type()), x(m.rows, 1, m.type());
+    double a;
+		z1 = matrix_minor(z, k);
+    
+		z = z1.clone();
+    z.col(k).copyTo(x);
+    
+		a = std::sqrt(x.dot(x));
+    //If floating-point used, a should be opposite sign as the k-th coordinate m to avoid loss of significance
+		if (m.at<double>(k,k) > 0) a = -a;  
+		e.at<double>(k,0) = 1.0;
+    e = x + (e*a);
+		e = e / std::sqrt(e.dot(e));
+    cv::Mat qi = cv::Mat::eye(e.rows, e.rows, e.type()) - 2.0 * e * e.t();
+    
+		q.push_back(qi.clone());
+		z1 = qi * z;
+		z1.copyTo(z);
+	}
+	
+  //Q has dimensions of transpose of qi
+  Q = cv::Mat::eye(q.front().cols, q.front().rows, q.front().type());
+  //Multiply all elements of qi
+  for(cv::Mat qi : q) Q = Q * qi.t(); 
+  R = Q.t() * m;
+}
+  
+/*
 void shiftQuadrants(cv::Mat& I)
 {
   // rearrange the quadrants of Fourier image  so that the origin is at the image center
@@ -42,8 +122,7 @@ void shiftQuadrants(cv::Mat& I)
   tmp.copyTo(q2);
 }
 
-/*
- * //GUI FEATURES
+  //GUI FEATURES
 void showHistogram(const cv::Mat& src)
 {
   if (src.channels() != 1)
@@ -198,6 +277,7 @@ void shift(cv::Mat& I, cv::Mat& O, const int& cxIndex, const int& cyIndex)
  *              depending on the value of total number of images).
  * @return new composite image.
  */
+/*
 cv::Mat makeCanvas(std::vector<cv::Mat>& vecMat, int windowHeight, int nRows)
 {
   int N = vecMat.size();
@@ -271,7 +351,7 @@ void writeOnImage(cv::Mat& img, const std::string& text)
           cv::Scalar::all(255), thickness, 8);
 
 }
-
+*/
 unsigned int optimumSideLength(const unsigned int& minimumLength, const double& radiousLength)
 { //Enlarge the image size if the a circle with radious length doesn't fit in it
   double diff = (2*radiousLength) - (minimumLength-2);
@@ -506,12 +586,13 @@ cv::Mat normComplex(const cv::Mat& A, cv::Mat& out)
     //Divide every matrix element by the complex value at the origin (frequency 0,0)
     auto sA = splitComplex(A);
     cv::Mat norm = cv::repeat(A.col(0).row(0), A.rows, A.cols);
+    
+    
     auto sF = splitComplex(norm);
     //Zero value the imaginary part of the normalizations factor, it should be zero anyway
     sF.second = cv::Mat::zeros(sF.first.size(), sF.first.type());
-
+    
     cv::Mat den = (sF.first).mul(sF.first) + (sF.second).mul(sF.second);
-
     out = makeComplex( ( (sA.first).mul(sF.first)  + (sA.second).mul(sF.second) )/den,
                      ( (sA.second).mul(sF.first) - (sA.first).mul(sF.second)  )/den  );
     //In order to keep generic image type, it's a matrix instead of a complex value
@@ -601,4 +682,373 @@ cv::Mat makeComplex(const cv::Mat& real)
 
   return C;
 }
+
+//from phasecorr.cpp within opencv library code
+void fftShift(cv::Mat& out)
+{
+    if(out.rows == 1 && out.cols == 1)
+    {
+        // trivially shifted.
+        return;
+    }
+
+    std::vector<cv::Mat> planes;
+    cv::split(out, planes);
+
+    int xMid = out.cols >> 1;
+    int yMid = out.rows >> 1;
+
+    bool is_1d = xMid == 0 || yMid == 0;
+
+    if(is_1d)
+    {
+        xMid = xMid + yMid;
+
+        for(size_t i = 0; i < planes.size(); i++)
+        {
+            cv::Mat tmp;
+            cv::Mat half0(planes[i], cv::Rect(0, 0, xMid, 1));
+            cv::Mat half1(planes[i], cv::Rect(xMid, 0, xMid, 1));
+
+            half0.copyTo(tmp);
+            half1.copyTo(half0);
+            tmp.copyTo(half1);
+        }
+    }
+    else
+    {
+        for(size_t i = 0; i < planes.size(); i++)
+        {
+            // perform quadrant swaps...
+            cv::Mat tmp;
+            cv::Mat q0(planes[i], cv::Rect(0,    0,    xMid, yMid));
+            cv::Mat q1(planes[i], cv::Rect(xMid, 0,    xMid, yMid));
+            cv::Mat q2(planes[i], cv::Rect(0,    yMid, xMid, yMid));
+            cv::Mat q3(planes[i], cv::Rect(xMid, yMid, xMid, yMid));
+
+            q0.copyTo(tmp);
+            q3.copyTo(q0);
+            tmp.copyTo(q3);
+
+            q1.copyTo(tmp);
+            q2.copyTo(q1);
+            tmp.copyTo(q2);
+        }
+    }
+
+    cv::merge(planes, out);
+}
+
+
+//from phasecorr.cpp within opencv library code
+void divSpectrums(const cv::Mat& srcA, const cv::Mat& srcB, cv::Mat& dst, int flags, bool conjB)
+{
+    int depth = srcA.depth(), cn = srcA.channels(), type = srcA.type();
+    int rows = srcA.rows, cols = srcA.cols;
+    int j, k;
+
+    if( !(type == srcB.type() && srcA.size() == srcB.size()) ) throw CustomException("divSpectrums: Wrong dimensions.");
+  
+    if( !(type == CV_32FC1 || type == CV_32FC2 || type == CV_64FC1 || type == CV_64FC2) ) throw CustomException("divSpectrums: Wrong input type.");
+
+    dst.create( srcA.rows, srcA.cols, type );
+    
+
+    bool is_1d = (flags & cv::DFT_ROWS) || (rows == 1 || (cols == 1 &&
+             srcA.isContinuous() && srcB.isContinuous() && dst.isContinuous()));
+
+    if( is_1d && !(flags & cv::DFT_ROWS) )
+        cols = cols + rows - 1, rows = 1;
+
+    int ncols = cols*cn;
+    int j0 = cn == 1;
+    int j1 = ncols - (cols % 2 == 0 && cn == 1);
+
+    if( depth == CV_32F )
+    {
+        const float* dataA = srcA.ptr<float>();
+        const float* dataB = srcB.ptr<float>();
+        float* dataC = dst.ptr<float>();
+        float eps = FLT_EPSILON; // prevent div0 problems
+
+        size_t stepA = srcA.step/sizeof(dataA[0]);
+        size_t stepB = srcB.step/sizeof(dataB[0]);
+        size_t stepC = dst.step/sizeof(dataC[0]);
+
+        if( !is_1d && cn == 1 )
+        {
+            for( k = 0; k < (cols % 2 ? 1 : 2); k++ )
+            {
+                if( k == 1 )
+                    dataA += cols - 1, dataB += cols - 1, dataC += cols - 1;
+                dataC[0] = dataA[0] / (dataB[0] + eps);
+                if( rows % 2 == 0 )
+                    dataC[(rows-1)*stepC] = dataA[(rows-1)*stepA] / (dataB[(rows-1)*stepB] + eps);
+                if( !conjB )
+                    for( j = 1; j <= rows - 2; j += 2 )
+                    {
+                        double denom = (double)dataB[j*stepB]*dataB[j*stepB] +
+                                       (double)dataB[(j+1)*stepB]*dataB[(j+1)*stepB] + (double)eps;
+
+                        double re = (double)dataA[j*stepA]*dataB[j*stepB] +
+                                    (double)dataA[(j+1)*stepA]*dataB[(j+1)*stepB];
+
+                        double im = (double)dataA[(j+1)*stepA]*dataB[j*stepB] -
+                                    (double)dataA[j*stepA]*dataB[(j+1)*stepB];
+
+                        dataC[j*stepC] = (float)(re / denom);
+                        dataC[(j+1)*stepC] = (float)(im / denom);
+                    }
+                else
+                    for( j = 1; j <= rows - 2; j += 2 )
+                    {
+
+                        double denom = (double)dataB[j*stepB]*dataB[j*stepB] +
+                                       (double)dataB[(j+1)*stepB]*dataB[(j+1)*stepB] + (double)eps;
+
+                        double re = (double)dataA[j*stepA]*dataB[j*stepB] -
+                                    (double)dataA[(j+1)*stepA]*dataB[(j+1)*stepB];
+
+                        double im = (double)dataA[(j+1)*stepA]*dataB[j*stepB] +
+                                    (double)dataA[j*stepA]*dataB[(j+1)*stepB];
+
+                        dataC[j*stepC] = (float)(re / denom);
+                        dataC[(j+1)*stepC] = (float)(im / denom);
+                    }
+                if( k == 1 )
+                    dataA -= cols - 1, dataB -= cols - 1, dataC -= cols - 1;
+            }
+        }
+
+        for( ; rows--; dataA += stepA, dataB += stepB, dataC += stepC )
+        {
+            if( is_1d && cn == 1 )
+            {
+                dataC[0] = dataA[0] / (dataB[0] + eps);
+                if( cols % 2 == 0 )
+                    dataC[j1] = dataA[j1] / (dataB[j1] + eps);
+            }
+
+            if( !conjB )
+                for( j = j0; j < j1; j += 2 )
+                {
+                    double denom = (double)(dataB[j]*dataB[j] + dataB[j+1]*dataB[j+1] + eps);
+                    double re = (double)(dataA[j]*dataB[j] + dataA[j+1]*dataB[j+1]);
+                    double im = (double)(dataA[j+1]*dataB[j] - dataA[j]*dataB[j+1]);
+                    dataC[j] = (float)(re / denom);
+                    dataC[j+1] = (float)(im / denom);
+                }
+            else
+                for( j = j0; j < j1; j += 2 )
+                {
+                    double denom = (double)(dataB[j]*dataB[j] + dataB[j+1]*dataB[j+1] + eps);
+                    double re = (double)(dataA[j]*dataB[j] - dataA[j+1]*dataB[j+1]);
+                    double im = (double)(dataA[j+1]*dataB[j] + dataA[j]*dataB[j+1]);
+                    dataC[j] = (float)(re / denom);
+                    dataC[j+1] = (float)(im / denom);
+                }
+        }
+    }
+    else
+    {
+        const double* dataA = srcA.ptr<double>();
+        const double* dataB = srcB.ptr<double>();
+        double* dataC = dst.ptr<double>();
+        double eps = DBL_EPSILON; // prevent div0 problems
+
+        size_t stepA = srcA.step/sizeof(dataA[0]);
+        size_t stepB = srcB.step/sizeof(dataB[0]);
+        size_t stepC = dst.step/sizeof(dataC[0]);
+
+        if( !is_1d && cn == 1 )
+        {
+            for( k = 0; k < (cols % 2 ? 1 : 2); k++ )
+            {
+                if( k == 1 )
+                    dataA += cols - 1, dataB += cols - 1, dataC += cols - 1;
+                dataC[0] = dataA[0] / (dataB[0] + eps);
+                if( rows % 2 == 0 )
+                    dataC[(rows-1)*stepC] = dataA[(rows-1)*stepA] / (dataB[(rows-1)*stepB] + eps);
+                if( !conjB )
+                    for( j = 1; j <= rows - 2; j += 2 )
+                    {
+                        double denom = dataB[j*stepB]*dataB[j*stepB] +
+                                       dataB[(j+1)*stepB]*dataB[(j+1)*stepB] + eps;
+
+                        double re = dataA[j*stepA]*dataB[j*stepB] +
+                                    dataA[(j+1)*stepA]*dataB[(j+1)*stepB];
+
+                        double im = dataA[(j+1)*stepA]*dataB[j*stepB] -
+                                    dataA[j*stepA]*dataB[(j+1)*stepB];
+
+                        dataC[j*stepC] = re / denom;
+                        dataC[(j+1)*stepC] = im / denom;
+                    }
+                else
+                    for( j = 1; j <= rows - 2; j += 2 )
+                    {
+                        double denom = dataB[j*stepB]*dataB[j*stepB] +
+                                       dataB[(j+1)*stepB]*dataB[(j+1)*stepB] + eps;
+
+                        double re = dataA[j*stepA]*dataB[j*stepB] -
+                                    dataA[(j+1)*stepA]*dataB[(j+1)*stepB];
+
+                        double im = dataA[(j+1)*stepA]*dataB[j*stepB] +
+                                    dataA[j*stepA]*dataB[(j+1)*stepB];
+
+                        dataC[j*stepC] = re / denom;
+                        dataC[(j+1)*stepC] = im / denom;
+                    }
+                if( k == 1 )
+                    dataA -= cols - 1, dataB -= cols - 1, dataC -= cols - 1;
+            }
+        }
+
+        for( ; rows--; dataA += stepA, dataB += stepB, dataC += stepC )
+        {
+            if( is_1d && cn == 1 )
+            {
+                dataC[0] = dataA[0] / (dataB[0] + eps);
+                if( cols % 2 == 0 )
+                    dataC[j1] = dataA[j1] / (dataB[j1] + eps);
+            }
+
+            if( !conjB )
+                for( j = j0; j < j1; j += 2 )
+                {
+                    double denom = dataB[j]*dataB[j] + dataB[j+1]*dataB[j+1] + eps;
+                    double re = dataA[j]*dataB[j] + dataA[j+1]*dataB[j+1];
+                    double im = dataA[j+1]*dataB[j] - dataA[j]*dataB[j+1];
+                    dataC[j] = re / denom;
+                    dataC[j+1] = im / denom;
+                }
+            else
+                for( j = j0; j < j1; j += 2 )
+                {
+                    double denom = dataB[j]*dataB[j] + dataB[j+1]*dataB[j+1] + eps;
+                    double re = dataA[j]*dataB[j] - dataA[j+1]*dataB[j+1];
+                    double im = dataA[j+1]*dataB[j] + dataA[j]*dataB[j+1];
+                    dataC[j] = re / denom;
+                    dataC[j+1] = im / denom;
+                }
+        }
+    }
+}
+
+void magSpectrums( const cv::Mat& src, cv::Mat& dst)
+{
+    //Mat src = _src.getMat();
+    int depth = src.depth(), cn = src.channels(), type = src.type();
+    int rows = src.rows, cols = src.cols;
+    int j, k;
+
+    if( !(type == CV_32FC1 || type == CV_32FC2 || type == CV_64FC1 || type == CV_64FC2) ) throw CustomException("magSpectrums: Wrong input type.");
+
+    if(src.depth() == CV_32F)
+        dst.create( src.rows, src.cols, CV_32FC1 );
+    else
+        dst.create( src.rows, src.cols, CV_64FC1 );
+
+    //Mat dst = _dst.getMat();
+    dst.setTo(0);//Mat elements are not equal to zero by default!
+
+    bool is_1d = (rows == 1 || (cols == 1 && src.isContinuous() && dst.isContinuous()));
+
+    if( is_1d )
+        cols = cols + rows - 1, rows = 1;
+
+    int ncols = cols*cn;
+    int j0 = cn == 1;
+    int j1 = ncols - (cols % 2 == 0 && cn == 1);
+
+    if( depth == CV_32F )
+    {
+        const float* dataSrc = src.ptr<float>();
+        float* dataDst = dst.ptr<float>();
+
+        size_t stepSrc = src.step/sizeof(dataSrc[0]);
+        size_t stepDst = dst.step/sizeof(dataDst[0]);
+
+        if( !is_1d && cn == 1 )
+        {
+            for( k = 0; k < (cols % 2 ? 1 : 2); k++ )
+            {
+                if( k == 1 )
+                    dataSrc += cols - 1, dataDst += cols - 1;
+                dataDst[0] = dataSrc[0]*dataSrc[0];
+                if( rows % 2 == 0 )
+                    dataDst[(rows-1)*stepDst] = dataSrc[(rows-1)*stepSrc]*dataSrc[(rows-1)*stepSrc];
+
+                for( j = 1; j <= rows - 2; j += 2 )
+                {
+                    dataDst[j*stepDst] = (float)std::sqrt((double)dataSrc[j*stepSrc]*dataSrc[j*stepSrc] +
+                                                          (double)dataSrc[(j+1)*stepSrc]*dataSrc[(j+1)*stepSrc]);
+                }
+
+                if( k == 1 )
+                    dataSrc -= cols - 1, dataDst -= cols - 1;
+            }
+        }
+
+        for( ; rows--; dataSrc += stepSrc, dataDst += stepDst )
+        {
+            if( is_1d && cn == 1 )
+            {
+                dataDst[0] = dataSrc[0]*dataSrc[0];
+                if( cols % 2 == 0 )
+                    dataDst[j1] = dataSrc[j1]*dataSrc[j1];
+            }
+
+            for( j = j0; j < j1; j += 2 )
+            {
+                dataDst[j] = (float)std::sqrt((double)dataSrc[j]*dataSrc[j] + (double)dataSrc[j+1]*dataSrc[j+1]);
+            }
+        }
+    }
+    else
+    {
+        const double* dataSrc = src.ptr<double>();
+        double* dataDst = dst.ptr<double>();
+
+        size_t stepSrc = src.step/sizeof(dataSrc[0]);
+        size_t stepDst = dst.step/sizeof(dataDst[0]);
+
+        if( !is_1d && cn == 1 )
+        {
+            for( k = 0; k < (cols % 2 ? 1 : 2); k++ )
+            {
+                if( k == 1 )
+                    dataSrc += cols - 1, dataDst += cols - 1;
+                dataDst[0] = dataSrc[0]*dataSrc[0];
+                if( rows % 2 == 0 )
+                    dataDst[(rows-1)*stepDst] = dataSrc[(rows-1)*stepSrc]*dataSrc[(rows-1)*stepSrc];
+
+                for( j = 1; j <= rows - 2; j += 2 )
+                {
+                    dataDst[j*stepDst] = std::sqrt(dataSrc[j*stepSrc]*dataSrc[j*stepSrc] +
+                                                   dataSrc[(j+1)*stepSrc]*dataSrc[(j+1)*stepSrc]);
+                }
+
+                if( k == 1 )
+                    dataSrc -= cols - 1, dataDst -= cols - 1;
+            }
+        }
+
+        for( ; rows--; dataSrc += stepSrc, dataDst += stepDst )
+        {
+            if( is_1d && cn == 1 )
+            {
+                dataDst[0] = dataSrc[0]*dataSrc[0];
+                if( cols % 2 == 0 )
+                    dataDst[j1] = dataSrc[j1]*dataSrc[j1];
+            }
+
+            for( j = j0; j < j1; j += 2 )
+            {
+                dataDst[j] = std::sqrt(dataSrc[j]*dataSrc[j] + dataSrc[j+1]*dataSrc[j+1]);
+            }
+        }
+    }
+}
+
 

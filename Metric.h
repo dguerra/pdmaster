@@ -28,9 +28,6 @@ public:
   void computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase,
                       const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& P);  
   double objectiveFunction(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise);
-  void objectEstimate(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
-                              const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, const cv::Mat& P, 
-                              const cv::Mat& Q, cv::Mat& F);
   void noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                    const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, const cv::Mat& P, const cv::Mat& Q, cv::Mat& filter);
   cv::Mat gradient(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise);

@@ -83,6 +83,11 @@ void readFITS(const std::string& fitsname, cv::Mat& cvImage)
 
 void writeFITS(const cv::Mat& cvImage, const std::string& filename)
 {
+  if(cvImage.channels() != 1)
+  {
+    CustomException("writeFITS: Only able to write FITS from single channel images.");
+  }
+  
   fitsfile *fptr; //pointer to the FITS file defined in fitsioh
   int status;
   char err_text[100];

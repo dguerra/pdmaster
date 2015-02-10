@@ -34,6 +34,36 @@ void udwd(const cv::Mat& imgOriginal, std::vector<cv::Mat>& wavelet_planes, cv::
   }
 }
 
+void swtSpectrums(const cv::Mat& imgSpectrums, std::vector<cv::Mat>& wavelet_planes, cv::Mat& residu, const unsigned int& total_planes)
+{
+  cv::Mat source;
+  imgSpectrums.copyTo(source);
+  
+  wavelet_planes.clear();
+  //discrete filter derived from scaling function. In our calculation a 1D spline of degree 3
+  double m[] = {1.0, 4.0, 6.0, 4.0, 1.0};
+  int row_elements = sizeof(m) / sizeof(m[0]);
+  cv::Mat row_ref(row_elements, 1, cv::DataType<double>::type, m);
+  double scale_factor(2.0);
+  cv::Mat scaling_function = row_ref * row_ref.t();
+
+  for(unsigned int nplane = 0; nplane < total_planes; ++nplane)
+  {
+    scaling_function = scaling_function / cv::sum(scaling_function).val[0];
+    cv::Mat kernelPadded = cv::Mat::zeros(source.size(), source.depth());
+    scaling_function.copyTo(selectCentralROI(kernelPadded, scaling_function.size()));
+
+    cv::Mat kernelPadded_ft;
+    cv::dft(kernelPadded, kernelPadded_ft, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+    cv::mulSpectrums(source, kernelPadded_ft.mul(kernelPadded.total()), residu, cv::DFT_COMPLEX_OUTPUT);
+
+    wavelet_planes.push_back(source - residu);
+    //update variables
+    residu.copyTo(source);
+    cv::resize(scaling_function, scaling_function, cv::Size(0,0), scale_factor, scale_factor, cv::INTER_NEAREST);
+  }  
+}
+
 //stationary wavelet transform - a trous isotropic wavelet transform
 void swt(const cv::Mat& imgOriginal, std::vector<cv::Mat>& wavelet_planes, cv::Mat& residu, const unsigned int& total_planes)
 {

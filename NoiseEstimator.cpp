@@ -68,7 +68,7 @@ void NoiseEstimator::meanPowerSpectrum(const cv::Mat& img)
     cv::Mat powerSpectrumShifted;
     shift(powerSpectrum, powerSpectrumShifted, powerSpectrum.cols/2, powerSpectrum.rows/2);
     meanPower_ = cv::sum(powerSpectrumShifted.mul(mask)).val[0]/cv::countNonZero(mask);
-    sigma2_ = imgSize * imgSize * meanPower_;
+    sigma2_ = img.total() * meanPower_;
     sigma_ = std::sqrt(sigma2_);
     //CAUTION!! noiseGamma = (noiseSigmaD0/noiseSigmaDk)^2 = avgPowerD0/avgPowerDk
   }
