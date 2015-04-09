@@ -29,23 +29,29 @@ public:
   Minimization();
   virtual ~Minimization();
   
+  cv::Mat gradient_diff(cv::Mat x, const std::function<double(cv::Mat)>& func);
+  
   double fret() const {return fret_;};
   
   void bracket(const double& a, const double& b, std::function<double(double)> &func);
   
   double brent(std::function<double(double)> &func);
   
-  double linmin(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func);
+  double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func);
   
-  //Build gradient and set next point a direction in convergence to the minimum
+  double armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
+
+  //Both annalitical expressions are supplied: objective function and gradient
   void dfpmin(cv::Mat &p, int &iter, double &fret, 
               std::function<double(cv::Mat )> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
   
-  int nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, 
-               cv::Mat &hessin, double &fret, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
+//  int nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, 
+//               cv::Mat &hessin, double &fret, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
  
   void minimize(cv::Mat &p, const cv::Mat &Q2,
                 const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc);
+  
+  int descentDirection(const cv::Mat& subdifferential, const cv::Mat& Bt, const std::function<cv::Mat(cv::Mat, cv::Mat)>& sup_gp, cv::Mat& p, cv::Mat& gnew);
   
 private:
   int iter_;   //total number of iterations to get to the mininum

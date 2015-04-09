@@ -6,13 +6,13 @@
  */
 
 #include "WavefrontSensor.h"
-#include "CustomException.h"
+//#include "CustomException.h"
 #include "Zernikes.h"
 #include "Zernikes.cpp"
-#include <cmath>
-#include "PDTools.h"
+//#include <cmath>
+//#include "PDTools.h"
 #include "TelescopeSettings.h"
-#include "FITS.h"
+//#include "FITS.h"
 #include "Metric.h"
 #include "Minimization.h"
 
@@ -23,7 +23,7 @@
 //A = scipy.array([[12, -51, 4], [6, 167, -68], [-4, 24, -41]])
 //Q, R = scipy.linalg.qr(A)
 
-constexpr double PI = 2 * acos(0.0);
+constexpr double PI = 3.14159265359;  //2 * acos(0.0);
 
 //Other names, phaseRecovery, ObjectReconstruction, ObjectRecovery
 
@@ -46,20 +46,13 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   {
     if (d_size != di.size())
     {
-      //std::cout << "Input dataset images must be iqual size" << std::endl;
-      throw CustomException("Input dataset images must be iqual size");
+      std::cout << "Input dataset images must be iqual size" << std::endl;
+      //throw CustomException("Input dataset images must be iqual size");
     }
   }
 
   TelescopeSettings tsettings(d_size.width);
   unsigned int numberOfZernikes = 14;   //total number of zernikes to be considered
-
-  unsigned int pupilSideLength = optimumSideLength(d_size.width/2, tsettings.pupilRadiousPixels());
-  std::cout << "pupilSideLength: " << pupilSideLength << std::endl;
-  std::cout << "pupilRadiousPixels: " << tsettings.pupilRadiousPixels() << std::endl;
-  std::map<unsigned int, cv::Mat> zernikeCatalog = Zernikes<double>::buildCatalog(numberOfZernikes, pupilSideLength, tsettings.pupilRadiousPixels());
-
-  std::cout << "Total original image energy: " << cv::sum(d.front()) << std::endl;
 
   std::vector<cv::Mat> D;
   for(cv::Mat di : d)
@@ -70,14 +63,14 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
     D.push_back(Di);
   }
 
-  double pupilRadiousP = tsettings.pupilRadiousPixels();
-  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, pupilRadiousP);
-    
+  unsigned int pupilSideLength = optimumSideLength(d_size.width/2, tsettings.pupilRadiousPixels());
+  std::cout << "pupilRadiousPixels: " << tsettings.pupilRadiousPixels() << std::endl;
+  
+  //double pupilRadiousP = tsettings.pupilRadiousPixels();
+  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
+  std::vector<cv::Mat> zBase = Zernikes<double>::zernikeBase(numberOfZernikes, d_size.width, tsettings.pupilRadiousPixels());
+  
   Metric mm;
-  
-//  std::vector<double> meanPowerNoise = {2.08519e-09, 1.9587e-09};    //sample case
-  std::vector<cv::Mat> zBase = Zernikes<double>::zernikeBase(numberOfZernikes, pupilSideLength, pupilRadiousP);
-  
   //Objective function and gradient of the objective function
   std::function<double(cv::Mat)> func = std::bind(&Metric::objectiveFunction, &mm, std::placeholders::_1, D, zBase, meanPowerNoise);
   std::function<cv::Mat(cv::Mat)> dfunc = std::bind(&Metric::gradient, &mm, std::placeholders::_1, D, zBase, meanPowerNoise);
@@ -90,33 +83,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   cv::Mat p = cv::Mat::zeros(M*K, 1, cv::DataType<double>::type);
   
   Minimization minimizationKit;
-  
-  {
-    //the following should be able to being implemented with this one line
-    // minimizationKit.minimize(p, Q2, objFunction, gradFunction);
-    
-    //Lambda function that turn minimize function + constraints problem into minimize function lower dimension problem
-    auto F_constrained = [] (cv::Mat x, std::function<double(cv::Mat)> func, const cv::Mat& Q2) -> double
-    {
-      return func(Q2*x);
-    };
-
-    auto DF_constrained = [] (cv::Mat x, std::function<cv::Mat(cv::Mat)> dfunc, const cv::Mat& Q2) -> cv::Mat
-    {
-      return Q2.t() * dfunc(Q2*x);
-    };
-  
-    std::function<double(cv::Mat)> f_constrained = std::bind(F_constrained, std::placeholders::_1, func, Q2);
-    std::function<cv::Mat(cv::Mat)> df_constrained = std::bind(DF_constrained, std::placeholders::_1, dfunc, Q2);
-    //Define a new starting point with lower dimensions after reduction with contraints
-    cv::Mat p_constrained = Q2.t() * p;
-    int iter_;
-    double fret_;
-    
-    minimizationKit.dfpmin(p_constrained, iter_, fret_, f_constrained, df_constrained);
-    p = Q2 * p_constrained;   //Go back to original dimensional 
-  }
-  
+  minimizationKit.minimize(p, Q2, func, dfunc);
   std::cout << "mimumum: " << p.t() << std::endl;
 
   return mm.F();

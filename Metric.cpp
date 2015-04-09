@@ -62,7 +62,7 @@ void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, const std::vector<
     cv::Mat pupilPhase_i = Zernikes<double>::phaseMapZernikeSum(pupilSideLength,tsettings.pupilRadiousPixels(), coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
     OS.push_back(OpticalSystem(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
   }
-   
+ 
 }
 
 void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
@@ -181,27 +181,45 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
   divSpectrums(P, Q, F_, cv::DFT_COMPLEX_OUTPUT);
   
   cv::mulSpectrums(F_, makeComplex(H), F_, cv::DFT_COMPLEX_OUTPUT);
-   
   /////Create L = sum{ abs(D0H - FHT0)^2 + abs(DkH - FHTk)^2 }
   cv::Mat accDiff = cv::Mat::zeros(F_.size(), F_.depth());
+  double S_l1(0.0);
+  bool CURVELETS(false);
   for(unsigned int j = 0; j < D.size(); ++j)
   {
     cv::Mat DjH;
     cv::mulSpectrums(D.at(j), makeComplex(H), DjH, cv::DFT_COMPLEX_OUTPUT);
     cv::Mat FHSj;
     cv::Mat Sj = OS.at(j).otf().clone();
+    if(CURVELETS == true)
+    {
+      S_l1 += l1_norm(Sj);
+    }
+
     fftShift(Sj);   //shifts fft spectrums and takes energy to the center of the image
     TelescopeSettings tsettings(D.front().cols);
     Sj.setTo(0, Zernikes<double>::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
     cv::mulSpectrums(F_, selectCentralROI(Sj, F_.size()), FHSj, cv::DFT_COMPLEX_OUTPUT);
+    //Wavelets support within this line
+    //fuse(DjH, FHSj, std::sqrt(DjH.total() * meanPowerNoise.at(j)), DjH);
+    //Split them up into wavelet represantation and apply mask to each channel independently
+//    std::vector<cv::Mat> wavelet_planesD, wavelet_planesF;
+//    cv::Mat residuD, residuF;
+//    unsigned int total_planes(4);
+//    swtSpectrums_(DjH, wavelet_planesD, residuD, total_planes);
+//    swtSpectrums_(FHSj, wavelet_planesF, residuF, total_planes);
+//    cv::accumulateSquare(absComplex((residuD) - (residuF)), accDiff);
+//    cv::accumulateSquare(absComplex((wavelet_planesD.at(0)) - (wavelet_planesF.at(0))), accDiff);
+//    cv::accumulateSquare(absComplex((wavelet_planesD.at(1)) - (wavelet_planesF.at(1))), accDiff);
+//    cv::accumulateSquare(absComplex((wavelet_planesD.at(2)) - (wavelet_planesF.at(2))), accDiff);
+//    cv::accumulateSquare(absComplex((wavelet_planesD.at(3)) - (wavelet_planesF.at(3))), accDiff);
+    //Ends experiment
     
-    fuse(DjH, FHSj, std::sqrt(DjH.total() * meanPowerNoise.at(j)), DjH);
-
     cv::accumulateSquare(absComplex(DjH - FHSj), accDiff);
   }
- 
+  
+  //Transfor obejct estimate F into curvelets coefficients
   L = cv::sum(accDiff).val[0];
-
   
   //Alternative way:
 //  cv::Mat absP = absComplex(P);
@@ -216,12 +234,38 @@ double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::M
 //    cv::accumulateSquare(absDjH, accDjH);  //Accumulate the square of the quantity absDj
 //  }
 //  L = cv::sum(accDjH - frac).val[0];
-  
-  
-  return L;
-  
+
+  return L + S_l1;
+
 }
-   
+ 
+/*
+void Metric::compute_dSdc_(const OpticalSystem& os, const std::map<unsigned int, cv::Mat>& zernikeCatalog,
+                                const cv::Mat& zernikesInUse, std::vector<cv::Mat>& dTdc)
+{
+  dTdc.clear();  //Clear all elements first
+  for(unsigned int currentIndex = 1; currentIndex <= zernikesInUse.total(); ++currentIndex)
+  {
+    cv::Mat dTdci;
+    if(zernikesInUse.at<bool>(currentIndex-1, 0) == true)
+    {
+      cv::Mat ZH;
+
+      cv::mulSpectrums(makeComplex(zernikeCatalog.at(currentIndex)), os.generalizedPupilFunction(), ZH, cv::DFT_COMPLEX_OUTPUT);
+      //cv::mulSpectrums(makeComplex(zr), os.generalizedPupilFunction(), ZH, cv::DFT_COMPLEX_OUTPUT);
+      cv::Mat H_ZH = divComplex(crosscorrelation(os.generalizedPupilFunction(), ZH), os.otfNormalizationFactor());
+      //showComplex(H_ZH, "H_ZH", false, false);
+      cv::Mat H_ZHFlipped;
+
+      cv::flip(H_ZH, H_ZHFlipped, -1); //flipCode => -1 < 0 means two axes flip
+      shift(H_ZHFlipped, H_ZHFlipped, 1, 1);  //shift matrix => 1,1 means one pixel to the right, one pixel down
+      std::pair<cv::Mat, cv::Mat> splitComplexMatrix = splitComplex(H_ZH - conjComplex(H_ZHFlipped));
+      dTdci = makeComplex((-1)*splitComplexMatrix.second, splitComplexMatrix.first);//equivalent to multiply by imaginary unit i
+    }
+    dTdc.push_back(dTdci);  //push_back empty matrix if zernike index is not in use
+  }
+}
+*/
 
 cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                           const std::vector<double>& meanPowerNoise )
@@ -287,25 +331,14 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
     cv::Mat Pjpjgl;
     cv::mulSpectrums(pjgl, Pj_pad, Pjpjgl, cv::DFT_COMPLEX_OUTPUT, conjB);
     
-
     cv::Mat grad = -2 * splitComplex(Pjpjgl).second;
-
   
     for(size_t m = 0; m < M; ++m)
     {
-      cv::Mat zBase = cv::Mat::zeros(D.front().size(), zernikeBase.at(m).type());
-      zernikeBase.at(m).copyTo(selectCentralROI(zBase, zernikeBase.at(m).size()));
-      
-      if(!zernikeBase.at(m).empty())
-      {
-        g.at<double>((j * M) + m , 0) = grad.dot(zBase);
-      }
-      else
-      {
-        g.at<double>((j * M) + m, 0) = 0.0;
-      }
+      if(!zernikeBase.at(m).empty()) {g.at<double>((j * M) + m, 0) = grad.dot(zernikeBase.at(m));}
+      else {g.at<double>((j * M) + m, 0) = 0.0;}
     }
   }
- 
-  return g;
+  g = g / (zernikeBase.front().total()/10.0);
+  return g; // + l1_norm_gradient_diff(coeffs, D, zernikeBase, meanPowerNoise);
 }

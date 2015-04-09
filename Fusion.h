@@ -12,6 +12,7 @@
 #include <vector>
 #include "opencv2/opencv.hpp"
 
+double l1_norm(cv::Mat F);
 void fuse(const cv::Mat& A, const cv::Mat& B, const double& sigmaNoise, cv::Mat& fusedImg);
 void swtSpectrums_(const cv::Mat& imgSpectrums, std::vector<cv::Mat>& wavelet_planes, cv::Mat& residu, const unsigned int& total_planes = 4);
 void probabilisticMask_(const cv::Mat& data, const cv::Mat& noise, const cv::Size& windowSize, cv::Mat& mask);

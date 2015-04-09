@@ -8,6 +8,7 @@ CPP_SRCS += \
 ../EffectivePixel.cpp \
 ../FITS.cpp \
 ../Fusion.cpp \
+../Curvelets.cpp \
 ../ImageQualityMetric.cpp \
 ../Minimization.cpp \
 ../Metric.cpp \
@@ -28,6 +29,7 @@ OBJS += \
 ./src/EffectivePixel.o \
 ./src/FITS.o \
 ./src/Fusion.o \
+./src/Curvelets.o \
 ./src/ImageQualityMetric.o \
 ./src/Minimization.o \
 ./src/Metric.o \
@@ -48,6 +50,7 @@ CPP_DEPS += \
 ./src/EffectivePixel.d \
 ./src/FITS.d \
 ./src/Fusion.d \
+./src/Curvelets.d \
 ./src/ImageQualityMetric.d \
 ./src/Minimization.d \
 ./src/Metric.d \

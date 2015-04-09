@@ -11,6 +11,8 @@
 
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize);
+bool test_curveLab();
+bool test_singleCurvelet();
 void test_noiseFilter();
 void test_generizedPupilFunctionVsOTF();
 void test_udwd_spectrums();
@@ -22,6 +24,7 @@ void test_conv_flaw();
 void test_wavelets();
 bool test_conjComplex();
 bool test_minimization();
+bool test_nonsmoothMinimization();
 bool test_crosscorrelation();
 bool test_specular();
 void test_selectCentralROI();

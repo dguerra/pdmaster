@@ -7,6 +7,10 @@
 #include "Fusion.h"
 #include "WaveletTransform.h"
 #include "PDTools.h"
+#include "FITS.h"
+#include "curvelab/fdct_wrapping.hpp"
+#include "curvelab/fdct_wrapping_inline.hpp"
+using namespace fdct_wrapping_ns;
 
 //committedObject
 //meaningfulObject
@@ -17,6 +21,38 @@
 //Replace every image Dj with the following:
 //summation over n = {1-N} of {Wo_n + mask_n * ( Wi_n - Wo_n )}
 //where mask_n indicates where information is located
+
+
+double l1_norm(cv::Mat F)
+{
+  //fdct_wrapping_
+  std::vector< vector<CpxNumMat> > curveletsCoeffs;  //vector<int> extra;
+  int nbscales(6), nbangles_coarse(8), ac(1);
+  cv::Mat f; //object estimate, measure space
+  cv::idft(F, f, cv::DFT_REAL_OUTPUT);
+  int m = f.rows, n = f.cols;
+  //std::cout << "m: " << m << "n: " << n << std::endl;
+  
+  CpxNumMat f_NumMat(m,n);
+  
+  for(int i=0; i<m; i++)
+    for(int j=0; j<n; j++)
+      f_NumMat(i,j) = f.at<double>(j,i);
+  //cv::Mat proof(f_NumMat.m(), f_NumMat.n(), cv::DataType<std::complex<double> >::type, f_NumMat.data() );  
+  //writeFITS(splitComplex(proof).first, "../curvAbs.fits");
+  fdct_wrapping(m, n, nbscales, nbangles_coarse, ac, f_NumMat, curveletsCoeffs);
+  double l1_norm(0.0);
+  for(auto i = curveletsCoeffs.begin(); i != curveletsCoeffs.end(); ++i)
+  { 
+    for(auto j = i->begin(); j != i->end(); ++j)
+    {
+      static int ii(0);
+      cv::Mat curv(j->m(),  j->n(), cv::DataType<double>::type, j->data());
+      l1_norm += cv::norm(curv, cv::NORM_L1);
+    }
+  }
+  return l1_norm;
+}
 
 void fuse(const cv::Mat& A, const cv::Mat& B, const double& sigmaNoise, cv::Mat& fusedImg)
 {

@@ -11,21 +11,22 @@
 #include "FITS.h"
 //#include "Minimization.h"
 //#include "Metric.h"
-//#include "PDTools.h"
+#include "PDTools.h"
 
 #include "Zernikes.h"
 #include "WaveletTransform.h"
 #include <chrono>
-
-//to compare the results mean squared error (MSE) and the structural similarity index (SSIM)
+#include <cmath>
 
 int main()
-{
+{  
   try
   {
     SubimageLayout subimageLayout;
-    //subimageLayout.navigateThrough();
+//    subimageLayout.navigateThrough();
     subimageLayout.computerGeneratedImage();
+//    test_nonsmoothMinimization();
+    //test_curveLab();
   }
   catch (cv::Exception const & e)
   {

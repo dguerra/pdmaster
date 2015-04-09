@@ -15,6 +15,7 @@
 #include "TelescopeSettings.h"
 #include "ImageQualityMetric.h"
 #include "PDTools.h"
+#include "Fusion.h"
 
 SubimageLayout::SubimageLayout()
 {
@@ -66,7 +67,7 @@ void SubimageLayout::computerGeneratedImage()
 
   cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   fftShift(complexI);
- 
+   
   double pupilRadious = 32.5011;
   double pupilSideLength = isize/2;
 
@@ -118,10 +119,10 @@ void SubimageLayout::computerGeneratedImage()
   fftShift(d2);
   cv::idft(d1, d1, cv::DFT_REAL_OUTPUT);
   cv::idft(d2, d2, cv::DFT_REAL_OUTPUT);
- 
+  
   cv::Mat noise1(isize, isize, cv::DataType<double>::type);
   cv::Mat noise2(isize, isize, cv::DataType<double>::type);
-  cv::Scalar sigma(1.1), m_(0);
+  cv::Scalar sigma(0.2), m_(0);
   
   cv::theRNG() = cv::RNG( time (0) );
   cv::randn(noise1, m_, sigma);
@@ -143,8 +144,8 @@ void SubimageLayout::computerGeneratedImage()
   cv::Scalar mssimd2 = iqm.mssim(img, d2_n);
   std::cout << "MSSIM d2: " << mssimd2.val[0] << std::endl;
   
-  cv::Scalar imageD1Offset = cv::sum(d1)/cv::Scalar(d1.total());
-  cv::Scalar imageD2Offset = cv::sum(d2)/cv::Scalar(d2.total());
+  //cv::Scalar imageD1Offset = cv::sum(d1)/cv::Scalar(d1.total());
+  //cv::Scalar imageD2Offset = cv::sum(d2)/cv::Scalar(d2.total());
   
   WavefrontSensor wSensor;
   std::vector<cv::Mat> d = {d1, d2};

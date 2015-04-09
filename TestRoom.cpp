@@ -20,9 +20,10 @@
 #include "FITS.h"
 //#include "AWMLE.h"
 #include "ImageQualityMetric.h"
-//#include "Minimization.h"
+#include "Minimization.h"
+#include "Curvelets.h"
 
-
+/*
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
 {
@@ -40,6 +41,162 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
 }
 
 
+bool test_nonsmoothMinimization()
+{
+  Minimization mm;
+  
+  cv::Mat Q2 = cv::Mat::eye(2, 2, cv::DataType<double>::type);
+  
+  std::function<double(cv::Mat)> absXplusAbsY = [] (cv::Mat x) -> double 
+  {
+    return std::abs(x.at<double>(0,0)) + 100.0 * std::abs(x.at<double>(1,0));
+  };
+  
+  std::function<double(cv::Mat)> funcc = [] (cv::Mat xx) -> double 
+  { //|x|+|10*y|+|x-1|+|10*y-1|+|x+1|+|10*y+1|+|10*y+3|
+    double x = xx.at<double>(0,0);
+    double y = xx.at<double>(1,0);
+    return std::abs(x) + std::abs(10*y) + std::abs(x-1) + std::abs(10*y-1) + std::abs(x+1) + std::abs(10*y+1) + std::abs(10*y+3);
+  };
+
+  std::function<cv::Mat(cv::Mat)> dfuncc_diff = [funcc] (cv::Mat x) -> cv::Mat
+  { //make up gradient vector through slopes and tiny differences
+    double EPS(1.0e-8);
+    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+  	cv::Mat xh = x.clone();
+	  double fold = funcc(x);
+    for(unsigned int j = 0; j < x.total(); ++j)
+    {
+      double temp = x.at<double>(j,0);
+      double h = EPS * std::abs(temp);
+      if (h == 0) h = EPS;
+      xh.at<double>(j,0) = temp + h;
+
+      h = xh.at<double>(j,0) - temp;
+      double fh = funcc(xh);
+      xh.at<double>(j,0) = temp;
+      df.at<double>(j,0) = (fh-fold)/h;
+    }
+    return df;
+
+  };
+  
+    //Subdifferential version
+  std::function<cv::Mat(cv::Mat)> dAbsXplusAbsY = [] (cv::Mat x) -> cv::Mat
+  { //Subdifferential vector function: subdifferential with every variable
+    cv::Mat t(2,1, cv::DataType<std::complex<double> >::type);  //Size(2,1)->1 row, 2 colums
+    double x0 = x.at<double>(0,0);
+    if(x0 == 0.0) t.at<std::complex<double> >(0,0) = std::complex<double>(-1.0, 1.0);
+    else t.at<std::complex<double> >(0,0) = std::complex<double>(x0/std::abs(x0), x0/std::abs(x0));
+    double x1 = x.at<double>(1,0);
+    if(x1 == 0.0) t.at<std::complex<double> >(1,0) = std::complex<double>(-100.0, 100.0);
+    else t.at<std::complex<double> >(1,0) = std::complex<double>(100.0 * x1/std::abs(x1), 100.0 * x1/std::abs(x1));
+
+    return t;
+  };
+
+  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat xx) -> cv::Mat
+  { //Subdifferential vector function: subdifferential with every variable
+    auto sign = [](double a, double b) -> double {return b >= 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as positive sign
+    auto sign_ = [](double a, double b) -> double {return b > 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as negative sign
+    cv::Mat t(2,1, cv::DataType<std::complex<double> >::type);  //Size(2,1)->1 row, 2 colums
+    double x = xx.at<double>(0,0);
+    double y = xx.at<double>(1,0);
+    double dx_h = sign(1.0, x-1) + sign(1.0, x+1) + sign(1.0, x);
+    double dx_l = sign_(1.0, x-1) + sign_(1.0, x+1) + sign(1.0, x);
+
+    double dy_h = sign(10.0, y) + sign(10.0, 10*y-1) + sign(10.0, 10*y+1) + sign(10.0, 10*y+3);
+    double dy_l = sign_(10.0, y) + sign_(10.0, 10*y-1) + sign_(10.0, 10*y+1) + sign_(10.0, 10*y+3);
+    if(dx_h != dx_l || dy_h != dy_l) std::cout << "nonsmooth point." << std::endl;
+    t.at<std::complex<double> >(0,0) = std::complex<double>(dx_l, dx_h);
+    t.at<std::complex<double> >(1,0) = std::complex<double>(dy_l, dy_h);
+
+    return t;
+  };
+
+  cv::Mat p = cv::Mat::zeros(2, 1, cv::DataType<double>::type) + 12.4 * cv::Mat::ones(2, 1, cv::DataType<double>::type);
+  p.at<double>(1,0) = -3.0/10.0;
+  mm.minimize(p, Q2, funcc, dfuncc);
+  
+  std::cout << "p " << p.t() << std::endl;
+  std::cout << "fret " << mm.fret() << std::endl;
+  
+  return true; 
+}
+*/
+
+bool test_singleCurvelet()
+{
+  int isize = 256;
+  cv::Mat complexI = cv::Mat::zeros(isize, isize, cv::DataType<double>::type);
+  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(complexI);
+ 
+  std::vector< vector<cv::Mat> > c;
+  Curvelets crvlts;
+  crvlts.fdct_wrapping(complexI, c);
+
+  int w = 6;
+  int s = 2;
+  int A = c.at(s).at(w).rows;
+  int B = c.at(s).at(w).cols;
+  
+  int a = std::ceil((A+1)/2);
+  int b = std::ceil((B+1)/2);
+  c.at(s).at(w).at<std::complex<double> >(a,b) = std::complex<double>(1.0,0.0);
+
+
+  cv::Mat complexO;
+  crvlts.ifdct_wrapping(c, complexO);
+  
+  writeFITS(splitComplex(complexO).first, "../real_curv_out.fits");
+ 
+  cv::dft(complexO, complexO, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(complexO);
+  writeFITS(absComplex(complexO), "../curv_out.fits");
+}
+
+
+bool test_curveLab()
+{
+  int isize = 256;
+  cv::Mat img;
+  cv::Mat dat;
+  readFITS("../inputs/surfi000.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+
+  int X(0),Y(0);
+  cv::Rect rect1(X, Y, isize, isize);
+    
+  img = img(rect1).clone();
+  cv::normalize(img, img, 0, 1, CV_MINMAX);
+  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
+  writeFITS(img, "../curv_in.fits");
+  cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
+  cv::Mat complexI;
+  cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
+  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(complexI);
+  
+  std::vector< vector<cv::Mat> > c;
+  Curvelets crvlts;
+  crvlts.fdct_wrapping(complexI, c);
+  
+  cv::Mat complexO;
+  crvlts.ifdct_wrapping(c, complexO);
+  
+  std::cout << "accuracy of conversion: " << cv::norm(complexI - complexO, cv::NORM_L2)/complexO.total() << std::endl;
+  fftShift(complexO);
+  cv::idft(complexO, complexO, cv::DFT_REAL_OUTPUT);
+  writeFITS(complexO, "../curv_out.fits");
+  
+  std::vector<std::vector<double> > sx, sy;
+  std::vector<std::vector<double> > fx, fy;
+  std::vector<std::vector<int> > nx, ny;
+  //fdct_wrapping_param(m, n, nbscales, nbangles_coarse, ac, sx, sy, fx, fy, nx, ny);
+  return true;
+}
+/*
 void test_udwd_spectrums()
 {
   cv::Mat dat, input;
@@ -78,7 +235,7 @@ void test_udwd_spectrums()
   std::cout << "Energy difference: " << std::sqrt(cv::sum(diff.mul(diff)).val[0]) << std::endl;  
 }
 
-/*
+
 bool test_minimization()
 {
  
