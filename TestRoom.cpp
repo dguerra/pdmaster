@@ -21,9 +21,12 @@
 //#include "AWMLE.h"
 #include "ImageQualityMetric.h"
 #include "Minimization.h"
+#include "curvelab/fdct_wrapping.hpp"
+#include "curvelab/fdct_wrapping_inline.hpp"
+
 #include "Curvelets.h"
 
-/*
+
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
 {
@@ -40,61 +43,327 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
   return A;
 }
 
+//fdct_wrapping_demo_denoise -- Image denoising using Curvelets
+bool test_curveletDemoDenoise()
+{
+  //See section 5.6.3 from book Sparse Image and Signal Processing - Starck
+  //Also examples from CurveLab software pack - Matlab code
+  
+  cv::Mat dat, img;
+  readFITS("../inputs/Lena.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+  
+  
+  cv::Mat gauss_noise(img.size(), cv::DataType<double>::type);
+  double sigma_ = 20;
+  cv::Scalar sigma(sigma_), m_(0);
+  
+  cv::theRNG() = cv::RNG( time (0) );
+  cv::randn(gauss_noise, m_, sigma);
+  cv::Mat noisy_img;
+  cv::add(img, gauss_noise, noisy_img);
+  
+  writeFITS(noisy_img, "../noisy_img.fits");
+  writeFITS(img, "../img.fits");
+  
+  cv::Mat F = cv::Mat::ones(img.size(), img.type());
+  cv::Mat X;
+  //cv::idft(F, X, cv::DFT_COMPLEX_OUTPUT);
+  cv::dft(F, X, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(X);
+  std::vector<std::vector<cv::Mat> > C;   //Curvelets coeffs
+  
+  Curvelets::fdct(X, C, false);
 
+  
+  /*
+  std::vector<std::vector<double> > E;
+  for(unsigned int s=0;s<C.size();++s)
+  {
+    std::vector<double> E_v;
+    for(unsigned int w=0;w<C.at(s).size();++w)
+    {
+      cv::Mat A;
+      C.at(s).at(w).copyTo(A);
+      bool conjB = true;
+      cv::Mat absA2;
+      cv::mulSpectrums(A, A, absA2, cv::DFT_COMPLEX_OUTPUT, conjB);
+      E_v.push_back( std::sqrt(cv::sum(absA2).val[0] ));
+      //E_v.push_back(0.0);
+    }
+    E.push_back(E_v);
+  }
+  */
+  
+  int nb(0);
+  for(unsigned int s=0;s<C.size();++s)
+  {
+    for(unsigned int w=0;w<C.at(s).size();++w)
+    {
+      nb += C.at(s).at(w).total();
+    }
+  }
+  double E = double(img.cols)/std::sqrt(nb);
+  
+  Curvelets::fdct(noisy_img, C, true);
+  
+  std::vector<std::vector<cv::Mat> > Ct;
+  //Ct.push_back(C.at(0).at(0));
+  for(unsigned int s=0;s<C.size();++s)
+  {
+    double thresh = 4.0 * sigma_ + sigma_ * (s+1 == C.size() ? 1 : 0);
+    std::vector<cv::Mat> Ct_v;
+    for(unsigned int w=0;w<C.at(s).size();++w)
+    {
+      cv::Mat A;
+      C.at(s).at(w).copyTo(A);
+      if(s!=0) A.setTo(0.0, cv::abs(A) < thresh * E);
+      Ct_v.push_back(A);
+    }
+    Ct.push_back(Ct_v);
+  }
+
+  cv::Mat restored_img;
+  Curvelets::ifdct(Ct, restored_img, img.rows, img.cols, true);
+
+  writeFITS(splitComplex(restored_img).first,  "../restored_img.fits" );
+
+  cv::dft(restored_img, restored_img, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(restored_img);
+  writeFITS(absComplex(restored_img), "../res_out.fits");
+
+  return true;
+
+/*
+//Starts matlab code from demo
+img = double(imread('Lena.jpg'));
+n = size(img,1);
+sigma = 20;        
+is_real = 1;
+
+noisy_img = img + sigma*randn(n);
+
+disp('Compute all thresholds');
+F = ones(n);
+X = fftshift(ifft2(F)) * sqrt(prod(size(F)));   % second term accounts for unitary fft
+tic, C = fdct_wrapping(X,0); toc;
+
+% Compute norm of curvelets (exact)
+E = cell(size(C));
+for s=1:length(C)
+  E{s} = cell(size(C{s}));
+  for w=1:length(C{s})
+    A = C{s}{w};
+    E{s}{w} = sqrt(sum(sum(A.*conj(A))) / prod(size(A)));
+  end
+end
+
+% Take curvelet transform
+disp(' ');
+disp('Take curvelet transform: fdct_wrapping');
+tic; C = fdct_wrapping(noisy_img,1); toc;
+
+% Apply thresholding
+Ct = C;
+for s = 2:length(C)
+  thresh = 3*sigma + sigma*(s == length(C));
+  for w = 1:length(C{s})
+    Ct{s}{w} = C{s}{w}.* (abs(C{s}{w}) > thresh*E{s}{w});
+  end
+end
+
+% Take inverse curvelet transform 
+disp(' ');
+disp('Take inverse transform of thresholded data: ifdct_wrapping');
+tic; restored_img = real(ifdct_wrapping(Ct,1)); toc;
+*/
+}
+
+bool test_simpleCurveletsRegularization()
+{
+  // See here: https://docs.google.com/document/d/1lAlX7BfVZT9RNaoEtQpjkysKbB--e4hXnS8UYAuv7rM/edit?usp=sharing
+  cv::Mat dat, img;
+  readFITS("../inputs/Lena.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+  cv::flip(img, img, 0);
+  
+  cv::Mat gauss_noise_1(img.size(), cv::DataType<double>::type);
+  cv::Mat gauss_noise_2(img.size(), cv::DataType<double>::type);
+  double sigma_ = 20;
+  cv::Scalar sigma(sigma_), m_(0);
+  
+  cv::theRNG() = cv::RNG( time (0) );
+  cv::randn(gauss_noise_1, m_, sigma);
+  cv::randn(gauss_noise_2, m_, sigma);
+  cv::Scalar cnt(17.4);
+  
+  cv::Mat d1 = img.mul(cnt) + gauss_noise_1;
+  cv::Mat d2 = img.mul(cv::Scalar(3.0) + cnt) + gauss_noise_2;
+  std::cout << "hello" << std::endl;
+  
+  auto L = [d1, d2](const cv::Mat& a_) -> double 
+  { 
+    double a = a_.at<double>(0,0);
+    cv::Mat f;
+    cv::divide(d1.mul(2.0*a) + d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
+    cv::Mat res = (f.mul(a)-d1).mul(f.mul(a)-d1);// + (f.mul(3.0+a)-d2).mul(f.mul(3.0+a)-d2);
+    return cv::sum(res).val[0];
+  };
+  
+  auto dL = [d1, d2] (const cv::Mat& a_) -> cv::Mat
+  {
+    double a = a_.at<double>(0,0);
+    cv::Mat f;
+    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
+    cv::Mat res = (f.mul(a)-d1).mul(f.mul(2.0));// + ((3+a)*f-d2).mul(f.mul(2.0));
+    cv::Mat r = cv::Mat::zeros(1, 1, cv::DataType<std::complex<double> >::type);
+    r.at<std::complex<double> >(0, 0) = std::complex<double>(cv::sum(res).val[0], cv::sum(res).val[0]);
+    return r;
+  };
+  
+  auto curvelet_l1norm = [d1, d2] (const cv::Mat& a_) -> double
+  {
+    double a = a_.at<double>(0,0);
+    //d1 image into curvelets
+    std::vector<std::vector<cv::Mat> > C1;
+    Curvelets::fdct(d1, C1, true);
+  
+    //d2 image into curvelets
+    std::vector<std::vector<cv::Mat> > C2;
+    Curvelets::fdct(d2, C2, true);
+
+    cv::Mat f;
+    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
+    std::vector<std::vector<cv::Mat> > Cf;
+    Curvelets::fdct(f, Cf, true);
+    
+    double l1norm(0.0);
+    for(unsigned int w = 0; w < Cf.size(); ++w)
+    { 
+      for(unsigned int s = 0; s < Cf.at(w).size(); ++s)
+      {
+        double t1 = (2.0*a)/(2.0*a*a+2.0*(3.0+a)*(3.0+a));
+        double t2 = (2.0*(3.0+a))/(2.0*a*a+2.0*(3.0+a)*(3.0+a));
+
+        l1norm += cv::norm(C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), cv::NORM_L1);
+      }
+    }
+    //std::cout << "l1norm: " << l1norm << " vs Curvelets::l1_norm(Cf): " << Curvelets::l1_norm(Cf);
+    return Curvelets::l1_norm(Cf);
+  };
+  
+  auto dcurvelet_l1norm = [d1, d2] (const cv::Mat& a_) -> cv::Mat
+  {
+    cv::Mat g = cv::Mat::zeros(1, 1, cv::DataType<std::complex<double> >::type);
+    double a = a_.at<double>(0,0);
+    
+    //d1 image into curvelets
+    std::vector<std::vector<cv::Mat> > C1;
+    Curvelets::fdct(d1, C1, true);
+    //d2 image into curvelets
+    std::vector<std::vector<cv::Mat> > C2;
+    Curvelets::fdct(d2, C2, true);
+    
+    cv::Mat f;
+    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
+    std::vector<std::vector<cv::Mat> > Cf;
+    Curvelets::fdct(f, Cf, true);
+    
+    double low_subgradient, high_subgradient;
+    for(unsigned int w = 0; w < Cf.size(); ++w)
+    { 
+      for(unsigned int s = 0; s < Cf.at(w).size(); ++s)
+      {
+        Cf.at(w).at(s).setTo(0.0, Cf.at(w).at(s)<=0.00001);
+        double t1 = (9.0-2.0*a*a)/((2.0*a*a+6.0*a+9.0)*(2.0*a*a+6.0*a+9.0));
+        double t2 = -(2.0*a*a+12.0*a+9.0)/((2.0*a*a+6.0*a+9.0)*(2.0*a*a+6.0*a+9.0));
+        cv::Mat signCrvlts = cv::Mat::ones(Cf.at(w).at(s).size(), Cf.at(w).at(s).depth());
+        cv::Mat signCrvlts_ = cv::Mat::ones(Cf.at(w).at(s).size(), Cf.at(w).at(s).depth());
+        signCrvlts.setTo(-1.0, Cf.at(w).at(s)<0.0);
+        signCrvlts_.setTo(-1.0, Cf.at(w).at(s)<=0.0);
+
+        cv::Mat A, A_;
+        cv::multiply(signCrvlts , C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), A);  //"sign" function considers zero as positive sign
+        cv::multiply(signCrvlts_, C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), A_);  //"sign_" function considers zero as negative sign
+          
+        low_subgradient += cv::sum(cv::min(A, A_)).val[0];
+        high_subgradient += cv::sum(cv::max(A, A_)).val[0];
+        if(low_subgradient != high_subgradient) std::cout << "Non smooth point!" << std::endl;
+      }
+    }
+    g.at<std::complex<double> >(0, 0) = std::complex<double>(low_subgradient, high_subgradient);
+    
+    return g;
+  };
+  
+  cv::Mat p = cv::Mat::zeros(1, 1, cv::DataType<double>::type);
+  
+  cv::Mat Q2 = cv::Mat::eye(1, 1, cv::DataType<double>::type);
+  
+  Minimization minimizationKit;
+  
+  auto func = [L, curvelet_l1norm](const cv::Mat& a_) -> double 
+  {
+    return L(a_) + curvelet_l1norm(a_);
+  };
+  auto dfunc = [dL, dcurvelet_l1norm](const cv::Mat& a_) -> cv::Mat
+  {
+    return dL(a_) + dcurvelet_l1norm(a_);
+  };
+  for(unsigned int i = 0; i<80;++i )
+  {
+    cv::Mat aa = cv::Mat::zeros(1, 1, cv::DataType<double>::type);
+    aa.at<double>(0,0) = double(i) * 0.5;
+    //std::cout << double(i) * 0.5 << ", " << L(aa) << std::endl;
+    std::cout << double(i) * 0.5 << ", " << curvelet_l1norm(aa) << std::endl;
+  }
+  minimizationKit.minimize(p, Q2, L, dL);
+  std::cout << "mimumum: " << p.t() << std::endl;
+  cv::Mat f_;
+  double p_ = p.at<double>(0,0);
+  cv::divide(d1.mul(2.0*p_)+d2.mul(2.0*(3.0+p_)), 2.0*p_*p_+2.0*(3.0+p_)*(3.0+p_), f_);
+  //writeFITS(f_, "../obejct.fits");
+  //writeFITS(d1, "../d1.fits");
+  return true;
+}
+
+/*
 bool test_nonsmoothMinimization()
 {
   Minimization mm;
   
   cv::Mat Q2 = cv::Mat::eye(2, 2, cv::DataType<double>::type);
-  
+
   std::function<double(cv::Mat)> absXplusAbsY = [] (cv::Mat x) -> double 
-  {
-    return std::abs(x.at<double>(0,0)) + 100.0 * std::abs(x.at<double>(1,0));
+  { //|x|+|y|
+    return std::abs(x.at<double>(0,0)) + std::abs(x.at<double>(1,0));
   };
-  
-  std::function<double(cv::Mat)> funcc = [] (cv::Mat xx) -> double 
-  { //|x|+|10*y|+|x-1|+|10*y-1|+|x+1|+|10*y+1|+|10*y+3|
-    double x = xx.at<double>(0,0);
-    double y = xx.at<double>(1,0);
-    return std::abs(x) + std::abs(10*y) + std::abs(x-1) + std::abs(10*y-1) + std::abs(x+1) + std::abs(10*y+1) + std::abs(10*y+3);
-  };
-
-  std::function<cv::Mat(cv::Mat)> dfuncc_diff = [funcc] (cv::Mat x) -> cv::Mat
-  { //make up gradient vector through slopes and tiny differences
-    double EPS(1.0e-8);
-    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
-  	cv::Mat xh = x.clone();
-	  double fold = funcc(x);
-    for(unsigned int j = 0; j < x.total(); ++j)
-    {
-      double temp = x.at<double>(j,0);
-      double h = EPS * std::abs(temp);
-      if (h == 0) h = EPS;
-      xh.at<double>(j,0) = temp + h;
-
-      h = xh.at<double>(j,0) - temp;
-      double fh = funcc(xh);
-      xh.at<double>(j,0) = temp;
-      df.at<double>(j,0) = (fh-fold)/h;
-    }
-    return df;
-
-  };
-  
     //Subdifferential version
   std::function<cv::Mat(cv::Mat)> dAbsXplusAbsY = [] (cv::Mat x) -> cv::Mat
   { //Subdifferential vector function: subdifferential with every variable
     cv::Mat t(2,1, cv::DataType<std::complex<double> >::type);  //Size(2,1)->1 row, 2 colums
+    auto sign = [](double a, double b) -> double {return b >= 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as positive sign
+    auto sign_ = [](double a, double b) -> double {return b > 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as negative sign
     double x0 = x.at<double>(0,0);
-    if(x0 == 0.0) t.at<std::complex<double> >(0,0) = std::complex<double>(-1.0, 1.0);
-    else t.at<std::complex<double> >(0,0) = std::complex<double>(x0/std::abs(x0), x0/std::abs(x0));
     double x1 = x.at<double>(1,0);
-    if(x1 == 0.0) t.at<std::complex<double> >(1,0) = std::complex<double>(-100.0, 100.0);
-    else t.at<std::complex<double> >(1,0) = std::complex<double>(100.0 * x1/std::abs(x1), 100.0 * x1/std::abs(x1));
-
+    double dx0_h = sign(1.0, x0);
+    double dx0_l = sign_(1.0, x0);
+    double dx1_h = sign(1.0, x1);
+    double dx1_l = sign_(1.0, x1);
+    if(dx0_h < dx0_l) std::swap(dx0_h, dx0_l);
+    t.at<std::complex<double> >(0,0) = std::complex<double>(dx0_l, dx0_h);
+    if(dx1_h < dx1_l) std::swap(dx1_h, dx1_l);
+    t.at<std::complex<double> >(1,0) = std::complex<double>(dx1_l, dx1_h);
+    if(dx0_h != dx0_l || dx1_h != dx1_l) std::cout << "nonsmooth point." << std::endl;
     return t;
   };
 
+  std::function<double(cv::Mat)> funcc = [] (cv::Mat xx) -> double 
+  { //|x-1|+|y-3|+x^2
+    double x = xx.at<double>(0,0);
+    double y = xx.at<double>(1,0);
+    return std::abs(x-1) + std::abs(y-3) + x*x;
+  };
   std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat xx) -> cv::Mat
   { //Subdifferential vector function: subdifferential with every variable
     auto sign = [](double a, double b) -> double {return b >= 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as positive sign
@@ -102,27 +371,53 @@ bool test_nonsmoothMinimization()
     cv::Mat t(2,1, cv::DataType<std::complex<double> >::type);  //Size(2,1)->1 row, 2 colums
     double x = xx.at<double>(0,0);
     double y = xx.at<double>(1,0);
-    double dx_h = sign(1.0, x-1) + sign(1.0, x+1) + sign(1.0, x);
-    double dx_l = sign_(1.0, x-1) + sign_(1.0, x+1) + sign(1.0, x);
+    double dx_h = sign(1.0,x-1.0) + 2 * x;
+    double dx_l = sign_(1.0,x-1.0) + 2 * x;
 
-    double dy_h = sign(10.0, y) + sign(10.0, 10*y-1) + sign(10.0, 10*y+1) + sign(10.0, 10*y+3);
-    double dy_l = sign_(10.0, y) + sign_(10.0, 10*y-1) + sign_(10.0, 10*y+1) + sign_(10.0, 10*y+3);
+    double dy_h = sign(1.0, y-3.0);
+    double dy_l = sign_(1.0, y-3.0);
     if(dx_h != dx_l || dy_h != dy_l) std::cout << "nonsmooth point." << std::endl;
+    if(dx_l>dx_h) std::swap(dx_l, dx_h);
     t.at<std::complex<double> >(0,0) = std::complex<double>(dx_l, dx_h);
+    if(dy_l>dy_h) std::swap(dy_l, dy_h);
     t.at<std::complex<double> >(1,0) = std::complex<double>(dy_l, dy_h);
 
     return t;
   };
 
-  cv::Mat p = cv::Mat::zeros(2, 1, cv::DataType<double>::type) + 12.4 * cv::Mat::ones(2, 1, cv::DataType<double>::type);
-  p.at<double>(1,0) = -3.0/10.0;
-  mm.minimize(p, Q2, funcc, dfuncc);
+  std::function<double(cv::Mat)> onedim = [] (cv::Mat xx) -> double 
+  { //|x|
+    double x = xx.at<double>(0,0);
+    return std::abs(x-4);
+  };
+  std::function<cv::Mat(cv::Mat)> donedim = [] (cv::Mat xx) -> cv::Mat
+  { //Subdifferential vector function: subdifferential with every variable
+    auto sign = [](double a, double b) -> double {return b >= 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as positive sign
+    auto sign_ = [](double a, double b) -> double {return b > 0.0 ? std::abs(a) : -std::abs(a);};   //Consider zero as negative sign
+    cv::Mat t(1,1, cv::DataType<std::complex<double> >::type);  //Size(2,1)->1 row, 2 colums
+    double x = xx.at<double>(0,0);
+    double dx_h = sign(1.0,x-4);
+    double dx_l = sign_(1.0,x-4);
+
+    if(dx_h != dx_l) std::cout << "nonsmooth point." << std::endl;
+    if(dx_l>dx_h) std::swap(dx_l, dx_h);
+    t.at<std::complex<double> >(0,0) = std::complex<double>(dx_l, dx_h);
+
+    return t;
+  };
+  
+  cv::Mat p = cv::Mat::zeros(2, 1, cv::DataType<double>::type);// + 3.9 * cv::Mat::ones(2, 1, cv::DataType<double>::type);
+  p.at<double>(0,0) = -13;
+  p.at<double>(1,0) = -5;
+  //mm.minimize(p, Q2, funcc, dfuncc);
+  mm.minimize(p, Q2, absXplusAbsY, dAbsXplusAbsY);
   
   std::cout << "p " << p.t() << std::endl;
   std::cout << "fret " << mm.fret() << std::endl;
   
   return true; 
 }
+
 */
 
 bool test_singleCurvelet()
@@ -134,7 +429,7 @@ bool test_singleCurvelet()
  
   std::vector< vector<cv::Mat> > c;
   Curvelets crvlts;
-  crvlts.fdct_wrapping(complexI, c);
+  crvlts.fdct(complexI, c);
 
   int w = 6;
   int s = 2;
@@ -147,15 +442,57 @@ bool test_singleCurvelet()
 
 
   cv::Mat complexO;
-  crvlts.ifdct_wrapping(c, complexO);
+  crvlts.ifdct(c, complexO, isize, isize);
   
   writeFITS(splitComplex(complexO).first, "../real_curv_out.fits");
  
   cv::dft(complexO, complexO, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   fftShift(complexO);
   writeFITS(absComplex(complexO), "../curv_out.fits");
+  return true;
+}
+bool test_NORM_L1()
+{
+  cv::Mat m1 = cv::Mat::zeros(10, 10, cv::DataType<double>::type);
+  cv::Mat m2 = cv::Mat::ones(10, 10, cv::DataType<double>::type);
+  cv::Mat m3 = -2*cv::Mat::eye(10, 10, cv::DataType<double>::type);
+  std::vector<cv::Mat> v1;
+  v1.push_back(m1);
+  v1.push_back(m2);
+  
+  std::vector<cv::Mat> v2;
+  v2.push_back(m3);
+  
+  std::vector<std::vector<cv::Mat> > V;
+  V.push_back(v1);
+  V.push_back(v2);
+  
+  double res = Curvelets::l1_norm(V);
+  std::cout << "res: " << res << std::endl;
+  return true;
 }
 
+bool test_convolveDFT_vs_crosscorrelation()
+{
+  bool full(true), corr(true);
+  cv::Mat B1, B2;
+  cv::Mat A_real = createRandomMatrix<double>(5,5);
+  cv::Mat A_imag = createRandomMatrix<double>(5,5);
+  cv::Mat planes[2] = {A_real, A_imag};
+  cv::Mat A;
+  cv::merge(planes, 2, A);
+  convolveDFT(A, A, B1, full, corr);
+  //cv::copyMakeBorder(A, A, Top, Bottom, Left, Right, cv::BORDER_CONSTANT);
+  cv::copyMakeBorder(B1, B1, 1, 0, 1, 0, cv::BORDER_CONSTANT);
+  fftShift(B1);
+  
+  B2 = crosscorrelation(A, A);
+  std::cout << "B1" << splitComplex(B1).first << std::endl;
+  std::cout << "------------------------------" << std::endl;
+  std::cout << "B2" << splitComplex(B2).first << std::endl;
+  
+  return true;
+}
 
 bool test_curveLab()
 {
@@ -171,29 +508,25 @@ bool test_curveLab()
   img = img(rect1).clone();
   cv::normalize(img, img, 0, 1, CV_MINMAX);
   std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
-  writeFITS(img, "../curv_in.fits");
+  //writeFITS(img, "../curv_in.fits");
   cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
   cv::Mat complexI;
   cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
-  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(complexI);
-  
-  std::vector< vector<cv::Mat> > c;
+  //cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  //fftShift(complexI);
+
+  std::vector< std::vector<cv::Mat> > c;  //Wrapper class
+
   Curvelets crvlts;
-  crvlts.fdct_wrapping(complexI, c);
-  
+  crvlts.fdct(complexI, c);
+
   cv::Mat complexO;
-  crvlts.ifdct_wrapping(c, complexO);
-  
-  std::cout << "accuracy of conversion: " << cv::norm(complexI - complexO, cv::NORM_L2)/complexO.total() << std::endl;
-  fftShift(complexO);
-  cv::idft(complexO, complexO, cv::DFT_REAL_OUTPUT);
-  writeFITS(complexO, "../curv_out.fits");
-  
-  std::vector<std::vector<double> > sx, sy;
-  std::vector<std::vector<double> > fx, fy;
-  std::vector<std::vector<int> > nx, ny;
-  //fdct_wrapping_param(m, n, nbscales, nbangles_coarse, ac, sx, sy, fx, fy, nx, ny);
+  crvlts.ifdct(c, complexO, isize, isize);
+
+  //std::cout << "accuracy of conversion: " << cv::norm(complexI - complexO, cv::NORM_L2)/complexO.total() << std::endl;
+  //writeFITS(splitComplex(complexO).first, "../curv_out_first.fits");
+  //writeFITS(splitComplex(complexO).second, "../curv_out_second.fits");
+
   return true;
 }
 /*

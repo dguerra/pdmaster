@@ -24,32 +24,42 @@ Curvelets::~Curvelets()
   // TODO Auto-generated destructor stub
 }
 
-void Curvelets::fdct_wrapping(const cv::Mat& complexI, std::vector< vector<cv::Mat> >& c)
+void Curvelets::fdct(const cv::Mat& I, std::vector< std::vector<cv::Mat> >& c, const bool& real_coeffs)
 {
+  cv::Mat complexI;
+  if(I.channels() == 1)
+  {
+    cv::Mat planes[] = {I, cv::Mat::zeros(I.size(), I.type())};
+    cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
+  }
+  else
+  {
+    I.copyTo(complexI);  
+  }
+  
   c.clear();
   int m(complexI.rows ), n(complexI.cols );
+  int nbscales = std::floor(std::log2(std::min(m,n)))-3;
+  int nbangles_coarse(16), ac(0);
+
+  std::vector< std::vector<fdct_wrapping_ns::CpxNumMat> > c_nmat;  //CurveLab
   fdct_wrapping_ns::CpxNumMat x(m,n);
   memcpy( x._data, complexI.data, m*n*sizeof(std::complex<double>) );
   
-  std::vector< std::vector<fdct_wrapping_ns::CpxNumMat> > c_nmat;  //vector<int> extra;
-  
-  int nbscales = std::floor(std::log2(std::min(m,n)))-3;
-  int nbangles_coarse(16), ac(0);
   fdct_wrapping_ns::fdct_wrapping(m, n, nbscales, nbangles_coarse, ac, x, c_nmat);
-  
+      
   for(auto i = c_nmat.begin(); i != c_nmat.end(); ++i)
   { 
     std::vector<cv::Mat> tmpc;
     for(auto j = i->begin(); j != i->end(); ++j)
     {
       cv::Mat cc(j->m(),  j->n(), cv::DataType<std::complex<double> >::type, j->data());
-      tmpc.push_back( cc );
+      tmpc.push_back( cc.clone() );
     }
     c.push_back(tmpc);
   }
   
-  bool real_coeffs(true);
-  //if(real_coeffs) fdct_wrapping_c2r(c);
+  if(real_coeffs) c2r(c);
 }
 
 double Curvelets::l1_norm(const std::vector< vector<cv::Mat> >& c)
@@ -66,10 +76,9 @@ double Curvelets::l1_norm(const std::vector< vector<cv::Mat> >& c)
   return l1norm;
 }
 
-void Curvelets::ifdct_wrapping(std::vector< vector<cv::Mat> >& c, cv::Mat& complexI)
+void Curvelets::ifdct(std::vector< vector<cv::Mat> >& c, cv::Mat& complexI, int m, int n,  const bool& real_coeffs)
 {
-  bool real_coeffs(true);
-  //if(real_coeffs) fdct_wrapping_r2c(c);
+  if(real_coeffs) r2c(c);
   
   std::vector< std::vector<fdct_wrapping_ns::CpxNumMat> > c_nmat;
   for(auto i = c.begin(); i != c.end(); ++i)
@@ -79,14 +88,12 @@ void Curvelets::ifdct_wrapping(std::vector< vector<cv::Mat> >& c, cv::Mat& compl
     {
       fdct_wrapping_ns::CpxNumMat tmpc(j->rows, j->cols);
  
-      std::memcpy( tmpc._data, j->data, j->rows*j->cols*sizeof(std::complex<double>) );
+      memcpy( tmpc._data, j->data, j->rows*j->cols*sizeof(std::complex<double>) );
       v_tmpc.push_back(tmpc);
     }
     c_nmat.push_back(v_tmpc);
   }
  
-  
-  int m(256), n(256);   //#####ONLY TESTING
   int nbscales = std::floor(std::log2(std::min(m,n)))-3;
   int nbangles_coarse(16), ac(0);
   fdct_wrapping_ns::CpxNumMat y(m,n); fdct_wrapping_ns::clear(y);
@@ -95,7 +102,7 @@ void Curvelets::ifdct_wrapping(std::vector< vector<cv::Mat> >& c, cv::Mat& compl
 }
 
 
-void Curvelets::fdct_wrapping_c2r(std::vector< std::vector<cv::Mat> >& c)
+void Curvelets::c2r(std::vector< std::vector<cv::Mat> >& c)
 {
   // fdct_usfft_c2r - transform complex curvelet coefficients to real coefficients
   cv::Mat planes[2];
@@ -113,8 +120,8 @@ void Curvelets::fdct_wrapping_c2r(std::vector< std::vector<cv::Mat> >& c)
       c.at(s).at(w+(nw/2)) = std::sqrt(2.0) * A_planes[1];
     }
   }
-  //cv::split(c.at(nbs-1).at(0), planes);
-  //planes[0].copyTo( c.back().front() );
+  cv::split(c.at(nbs-1).at(0), planes);
+  c.at(nbs-1).at(0) = planes[0];
   
   /*
   function C = fdct_wrapping_c2r(C)
@@ -132,8 +139,10 @@ void Curvelets::fdct_wrapping_c2r(std::vector< std::vector<cv::Mat> >& c)
   */
 }
 
-void Curvelets::fdct_wrapping_r2c(std::vector< std::vector<cv::Mat> >& c)
+void Curvelets::r2c(std::vector< std::vector<cv::Mat> >& c)
 {
+  cv::Mat planes[2] = {c.at(0).at(0), cv::Mat::zeros(c.at(0).at(0).size(), c.at(0).at(0).type())};
+  cv::merge(planes, 2, c.at(0).at(0));
   // fdct_usfft_r2c - transform real curvelet coefficients to complex coefficients
   std::size_t nbs = c.size();
   for(unsigned int s = 1; s<nbs; ++s)
@@ -143,18 +152,19 @@ void Curvelets::fdct_wrapping_r2c(std::vector< std::vector<cv::Mat> >& c)
     {
       cv::Mat A = c.at(s).at(w);
       cv::Mat B = c.at(s).at(w+(nw/2));
-
       cv::Mat planes[] = {A, B};
       cv::Mat AB;
       cv::merge(planes, 2, AB);
       c.at(s).at(w) = (1.0/std::sqrt(2.0)) * AB;
-
       cv::Mat planes_conj[] = {A, -1*B};
       cv::Mat ABconj;
       cv::merge(planes_conj, 2, ABconj);
       c.at(s).at(w+(nw/2)) = (1.0/std::sqrt(2.0)) * ABconj;
     }
   }
+  planes[0] = c.at(nbs-1).at(0);
+  planes[1] = cv::Mat::zeros(c.at(nbs-1).at(0).size(), c.at(nbs-1).at(0).type());
+  cv::merge(planes, 2, c.at(nbs-1).at(0));
   /*
    function C = fdct_wrapping_r2c(C)
 % fdct_usfft_r2c - transform real curvelet coefficients to complex coefficients

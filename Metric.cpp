@@ -12,6 +12,7 @@
 #include "Zernikes.cpp"
 #include "FITS.h"
 #include "Fusion.h"
+#include "Curvelets.h"
 
 //To bind the arguments of the member function "hello", within "object"
 //Metric m;
@@ -86,6 +87,28 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
   Q.setTo(0, Zernikes<double>::phaseMapZernike(1, Q.cols, tsettings.cutoffPixel()) == 0);
 }
 
+void Metric::compute_dQ(const std::vector<cv::Mat>& D, const cv::Mat& zernikeElement, 
+                        const std::vector<OpticalSystem>& OS, cv::Mat& dQ)
+{
+   //We use 'depth' here instead of 'type' because we want 1-channel image
+  dQ = cv::Mat::zeros(D.front().size(), D.front().type());
+  for(size_t j = 0; j < D.size(); ++j)
+  { 
+    cv::Mat Sj = OS.at(j).otf().clone();
+    fftShift(Sj);
+    cv::Mat dSj, SjdSj, dSjSj;
+    compute_dSj(OS.at(j), zernikeElement, dSj);
+    
+    bool conjB(true);
+    cv::mulSpectrums(Sj, selectCentralROI(dSj, Sj.size()), SjdSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj x dSj*
+    cv::mulSpectrums(selectCentralROI(dSj, Sj.size()), Sj, dSjSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj* x dSj
+    //in case of undersampling optimumSideLength is bigger then image size
+    cv::Mat sumSjdSj = SjdSj + dSjSj;
+    cv::accumulate(selectCentralROI(sumSjdSj, D.front().size()), dQ); //equivalent to Q += (absSj)^2 === absSj.mul(absSj);
+  }
+}
+
+
 void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                             const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& P)
 {
@@ -105,6 +128,24 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
   TelescopeSettings tsettings(D.front().cols);
   P.setTo(0, Zernikes<double>::phaseMapZernike(1, P.cols, tsettings.cutoffPixel()) == 0);
 }
+
+void Metric::compute_dP(const std::vector<cv::Mat>& D, const cv::Mat& zernikeElement, 
+                        const std::vector<OpticalSystem>& OS, cv::Mat& dP)
+{
+  dP = cv::Mat::zeros(D.front().size(), D.front().type());
+
+  //dP = accumulate over J { Dj * derivative(conj(Sj)) } 
+  for(size_t j = 0; j < D.size(); ++j)
+  {
+    cv::Mat dSj, dSjDj;
+    compute_dSj(OS.at(j), zernikeElement, dSj);
+    bool conjB(true);
+    
+    cv::mulSpectrums(D.at(j), selectCentralROI(dSj, D.front().size()), dSjDj, cv::DFT_COMPLEX_OUTPUT, conjB);
+    cv::accumulate(dSjDj, dP);   //equivalent to dP += dSjDj;
+  }
+}
+
 
 void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                  const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, const cv::Mat& P, const cv::Mat& Q, cv::Mat& filter)
@@ -163,109 +204,75 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
 
 double Metric::objectiveFunction( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                                   const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise )
-{ 
-  
+{
   double L;
-  
   //Intermal metrics
   cv::Mat P, Q, H;
   std::vector<OpticalSystem> OS;
-  
   characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
-  
   computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS, Q);
   computeP(coeffs, D, zernikeBase, meanPowerNoise, OS, P);
   noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, P, Q, H);
-  
+
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F_, cv::DFT_COMPLEX_OUTPUT);
-  
   cv::mulSpectrums(F_, makeComplex(H), F_, cv::DFT_COMPLEX_OUTPUT);
+
   /////Create L = sum{ abs(D0H - FHT0)^2 + abs(DkH - FHTk)^2 }
   cv::Mat accDiff = cv::Mat::zeros(F_.size(), F_.depth());
-  double S_l1(0.0);
-  bool CURVELETS(false);
+  double l1_norm(0.0);
   for(unsigned int j = 0; j < D.size(); ++j)
   {
     cv::Mat DjH;
     cv::mulSpectrums(D.at(j), makeComplex(H), DjH, cv::DFT_COMPLEX_OUTPUT);
     cv::Mat FHSj;
-    cv::Mat Sj = OS.at(j).otf().clone();
-    if(CURVELETS == true)
-    {
-      S_l1 += l1_norm(Sj);
-    }
-
+    cv::Mat Sj = OS.at(j).otf().clone();    
+    
     fftShift(Sj);   //shifts fft spectrums and takes energy to the center of the image
     TelescopeSettings tsettings(D.front().cols);
     Sj.setTo(0, Zernikes<double>::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
-    cv::mulSpectrums(F_, selectCentralROI(Sj, F_.size()), FHSj, cv::DFT_COMPLEX_OUTPUT);
-    //Wavelets support within this line
-    //fuse(DjH, FHSj, std::sqrt(DjH.total() * meanPowerNoise.at(j)), DjH);
-    //Split them up into wavelet represantation and apply mask to each channel independently
-//    std::vector<cv::Mat> wavelet_planesD, wavelet_planesF;
-//    cv::Mat residuD, residuF;
-//    unsigned int total_planes(4);
-//    swtSpectrums_(DjH, wavelet_planesD, residuD, total_planes);
-//    swtSpectrums_(FHSj, wavelet_planesF, residuF, total_planes);
-//    cv::accumulateSquare(absComplex((residuD) - (residuF)), accDiff);
-//    cv::accumulateSquare(absComplex((wavelet_planesD.at(0)) - (wavelet_planesF.at(0))), accDiff);
-//    cv::accumulateSquare(absComplex((wavelet_planesD.at(1)) - (wavelet_planesF.at(1))), accDiff);
-//    cv::accumulateSquare(absComplex((wavelet_planesD.at(2)) - (wavelet_planesF.at(2))), accDiff);
-//    cv::accumulateSquare(absComplex((wavelet_planesD.at(3)) - (wavelet_planesF.at(3))), accDiff);
-    //Ends experiment
-    
+    cv::mulSpectrums(F_, selectCentralROI(Sj, F_.size()), FHSj, cv::DFT_COMPLEX_OUTPUT);    
     cv::accumulateSquare(absComplex(DjH - FHSj), accDiff);
   }
   
   //Transfor obejct estimate F into curvelets coefficients
   L = cv::sum(accDiff).val[0];
   
-  //Alternative way:
-//  cv::Mat absP = absComplex(P);
-//  cv::Mat frac, accDjH = cv::Mat::zeros(Q.size(), Q.type());
-//  cv::multiply(absP.mul(absP), H.mul(H)/splitComplex(Q).first, frac);
-//  for(cv::Mat Dj : D)
-//  {
-//    cv::Mat DjH;
-//    cv::mulSpectrums(Dj, makeComplex(H), DjH, cv::DFT_COMPLEX_OUTPUT);
-//    cv::Mat absDjH = absComplex(DjH);
-    //they're real matrices, so we use "mul" instead of mulSpectrums
-//    cv::accumulateSquare(absDjH, accDjH);  //Accumulate the square of the quantity absDj
-//  }
-//  L = cv::sum(accDjH - frac).val[0];
-
-  return L + S_l1;
-
+  return L;
 }
  
-/*
-void Metric::compute_dSdc_(const OpticalSystem& os, const std::map<unsigned int, cv::Mat>& zernikeCatalog,
-                                const cv::Mat& zernikesInUse, std::vector<cv::Mat>& dTdc)
+
+//Computes derivative of OTF with respect to an element of the zernike base
+void Metric::compute_dSj(const OpticalSystem& osj, const cv::Mat& zernikeElement, cv::Mat& dSj)
 {
-  dTdc.clear();  //Clear all elements first
-  for(unsigned int currentIndex = 1; currentIndex <= zernikesInUse.total(); ++currentIndex)
-  {
-    cv::Mat dTdci;
-    if(zernikesInUse.at<bool>(currentIndex-1, 0) == true)
-    {
-      cv::Mat ZH;
-
-      cv::mulSpectrums(makeComplex(zernikeCatalog.at(currentIndex)), os.generalizedPupilFunction(), ZH, cv::DFT_COMPLEX_OUTPUT);
-      //cv::mulSpectrums(makeComplex(zr), os.generalizedPupilFunction(), ZH, cv::DFT_COMPLEX_OUTPUT);
-      cv::Mat H_ZH = divComplex(crosscorrelation(os.generalizedPupilFunction(), ZH), os.otfNormalizationFactor());
-      //showComplex(H_ZH, "H_ZH", false, false);
-      cv::Mat H_ZHFlipped;
-
-      cv::flip(H_ZH, H_ZHFlipped, -1); //flipCode => -1 < 0 means two axes flip
-      shift(H_ZHFlipped, H_ZHFlipped, 1, 1);  //shift matrix => 1,1 means one pixel to the right, one pixel down
-      std::pair<cv::Mat, cv::Mat> splitComplexMatrix = splitComplex(H_ZH - conjComplex(H_ZHFlipped));
-      dTdci = makeComplex((-1)*splitComplexMatrix.second, splitComplexMatrix.first);//equivalent to multiply by imaginary unit i
-    }
-    dTdc.push_back(dTdci);  //push_back empty matrix if zernike index is not in use
-  }
+  cv::Mat Pj = osj.generalizedPupilFunction();
+  cv::Mat Pj_pad = cv::Mat::zeros(zernikeElement.size(), Pj.type());
+  Pj.copyTo(selectCentralROI(Pj_pad, Pj.size()));
+  cv::Mat ZH;
+  cv::mulSpectrums(makeComplex(zernikeElement), Pj_pad, ZH, cv::DFT_COMPLEX_OUTPUT);
+  
+  cv::Mat cross;
+  bool full(true), corr(true);
+  convolveDFT(Pj_pad, ZH, cross, corr, full);
+  cv::copyMakeBorder(cross, cross, 1, 0, 1, 0, cv::BORDER_CONSTANT);
+  fftShift(cross);
+  
+  //cv::Mat cross = crosscorrelation(Pj_pad, ZH);
+  cv::Mat H_ZH;
+  
+  cross.copyTo(H_ZH);
+ 
+  cv::Mat H_ZHFlipped;
+  cv::flip(H_ZH, H_ZHFlipped, -1); //flipCode => -1 < 0 means two axes flip
+  shift(H_ZHFlipped, H_ZHFlipped, 1, 1);  //shift matrix => 1,1 means one pixel to the right, one pixel down
+  cv::Mat diff = H_ZH - conjComplex(H_ZHFlipped);
+  std::pair<cv::Mat, cv::Mat> splitComplexMatrix = splitComplex(diff);
+  dSj = makeComplex((-1)*splitComplexMatrix.second, splitComplexMatrix.first).clone();//equivalent to multiply by imaginary unit i
+  fftShift(dSj);
+  
+  //dSj = -1 * dSj;    //PLEASE LOOK INTO THIS
 }
-*/
+
 
 cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                           const std::vector<double>& meanPowerNoise )
@@ -273,25 +280,25 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
   //Intermal metrics
   cv::Mat P, Q, H, F;
   std::vector<OpticalSystem> OS;
-  
   characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
-
   computeP(coeffs, D, zernikeBase, meanPowerNoise, OS, P);
   computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS, Q);
-
+  //Some useful calculations
+  cv::Mat absP2, Q2;
+  bool conjB(true);
+  cv::mulSpectrums(Q, Q, Q2, cv::DFT_COMPLEX_OUTPUT);
+  cv::mulSpectrums(P, P, absP2, cv::DFT_COMPLEX_OUTPUT, conjB);
   noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, P, Q, H);
-  
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F, cv::DFT_COMPLEX_OUTPUT);
-  cv::mulSpectrums(F, makeComplex(H), F, cv::DFT_COMPLEX_OUTPUT);
+  cv::mulSpectrums(F, makeComplex(H), F, cv::DFT_COMPLEX_OUTPUT);   //Filter the object estimate out
   
   size_t J = OS.size();
   size_t M = zernikeBase.size();
   
-  cv::Mat g = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
-  
-  //writeFITS(zernikeBase.at(0), "z0_" + std::to_string(i) + ".fits");
-  
+  cv::Mat g = cv::Mat::zeros(J*M, 1, cv::DataType<std::complex<double> >::type);
+
+
   for(size_t j = 0; j < J; ++j)
   {
     cv::Mat Pj = OS.at(j).generalizedPupilFunction();
@@ -299,13 +306,11 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
     cv::Mat Pj_pad = cv::Mat::zeros(D.front().size(), Pj.type());
     Pj.copyTo(selectCentralROI(Pj_pad, Pj.size()));
     
-    //Why is not here normalization needed with generalized pupil function?!!! 0.998277    
+    //Why is not here normalization needed with generalized pupil function?!!!
     cv::Mat pj_pad = Pj_pad.clone();
     fftShift(pj_pad);
     
     cv::idft(pj_pad, pj_pad, cv::DFT_COMPLEX_OUTPUT);  //##ALERT: Usually it's cv::DFT_REAL_OUTPUT with idft
-    
-    bool conjB(true);
     cv::Mat gl, pjgl;
     
     cv::Mat FDj;
@@ -319,7 +324,11 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
     cv::mulSpectrums(F, F, abs2F, cv::DFT_COMPLEX_OUTPUT, conjB);
     cv::mulSpectrums(abs2F, selectCentralROI(Sj, abs2F.size()), abs2FSj, cv::DFT_COMPLEX_OUTPUT);
     gl = FDj - abs2FSj;
-
+    
+    //Put V value aside for a later use
+    cv::Mat V;
+    gl.copyTo(V);
+    
     fftShift(gl);
     cv::idft(gl, gl, cv::DFT_COMPLEX_OUTPUT);    //##ALERT: Usually it's cv::DFT_REAL_OUTPUT with idft
     cv::mulSpectrums(makeComplex(splitComplex(gl).first), pj_pad, pjgl, cv::DFT_COMPLEX_OUTPUT);
@@ -330,15 +339,103 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
     
     cv::Mat Pjpjgl;
     cv::mulSpectrums(pjgl, Pj_pad, Pjpjgl, cv::DFT_COMPLEX_OUTPUT, conjB);
-    
+
     cv::Mat grad = -2 * splitComplex(Pjpjgl).second;
-  
+
     for(size_t m = 0; m < M; ++m)
     {
-      if(!zernikeBase.at(m).empty()) {g.at<double>((j * M) + m, 0) = grad.dot(zernikeBase.at(m));}
-      else {g.at<double>((j * M) + m, 0) = 0.0;}
+    //Alternate way of calculate V
+    cv::Mat PQ, PQD, absP2S, Va;
+    cv::mulSpectrums(Q, P, PQ, cv::DFT_COMPLEX_OUTPUT, conjB);    
+    cv::mulSpectrums(PQ, D.at(j), PQD, cv::DFT_COMPLEX_OUTPUT);
+    cv::mulSpectrums(absP2, selectCentralROI(Sj, absP2.size()), absP2S, cv::DFT_COMPLEX_OUTPUT);
+    divSpectrums(PQD-absP2S, Q2, Va, cv::DFT_COMPLEX_OUTPUT);
+    //Va.copyTo(V);
+      
+      cv::Mat dSjV, dSj;
+      compute_dSj(OS.at(j), zernikeBase.at(m), dSj);
+      cv::mulSpectrums(selectCentralROI(dSj,V.size()), V, dSjV, cv::DFT_COMPLEX_OUTPUT, conjB);
+      cv::mulSpectrums(V, selectCentralROI(dSj,V.size()), dSjV, cv::DFT_COMPLEX_OUTPUT, conjB);
+      double gi_alt = cv::sum(dSjV).val[0];
+
+      
+      double gi = grad.dot(zernikeBase.at(m));
+      //std::cout <<  "gi/gi_alt = " << gi << "/" << gi_alt << " = " << gi/gi_alt << std::endl;
+      
+      if(!zernikeBase.at(m).empty()) {g.at<std::complex<double> >((j * M) + m, 0) = std::complex<double>(gi ,gi);}
+      else {g.at<std::complex<double> >((j * M) + m, 0) = std::complex<double>(0.0,0.0);}
+
+      //if(!zernikeBase.at(m).empty()) {g.at<std::complex<double> >((j * M) + m, 0) = std::complex<double>(gi_alt ,gi_alt);}
+      //else {g.at<std::complex<double> >((j * M) + m, 0) = std::complex<double>(0.0,0.0);}
     }
   }
-  g = g / (zernikeBase.front().total()/10.0);
-  return g; // + l1_norm_gradient_diff(coeffs, D, zernikeBase, meanPowerNoise);
+  g = g / zernikeBase.front().total();
+  
+  
+  //### Gradient of the regularization part: L1_NORM(Curvelets(Sj)).
+  cv::Mat g_reg = cv::Mat::zeros(J*M, 1, cv::DataType<std::complex<double> >::type);
+  
+
+  return g + g_reg;
 }
+
+/*
+if(false)
+  {
+    std::vector< std::vector<cv::Mat> > f_crvlts;   //Cruvelets coefficients of object estimate in measure space
+    cv::Mat f(F);
+    fftShift(f);
+    cv::idft(f, f, cv::DFT_COMPLEX_OUTPUT);
+    
+    Curvelets::fdct(f, f_crvlts);   //will be used afterwards with -> sign(f_crvlts) 
+    static int iii(0);iii++;
+    //writeFITS(splitComplex(f).first, "../f"+std::to_string(iii)+".fits");
+    
+    
+  for(size_t j = 0; j < J; ++j)
+  {
+    for(size_t m = 0; m < M; ++m)
+    {
+      //Compute dFdZm
+      cv::Mat dP, dQ, QdP, PdQ, Q2, dF;
+      compute_dP(D, zernikeBase.at(m), OS, dP);
+      compute_dQ(D, zernikeBase.at(m), OS, dQ);
+      cv::mulSpectrums(Q, dP, QdP, cv::DFT_COMPLEX_OUTPUT);
+      cv::mulSpectrums(P, dQ, PdQ, cv::DFT_COMPLEX_OUTPUT);
+      cv::mulSpectrums(Q, Q, Q2, cv::DFT_COMPLEX_OUTPUT);
+      divSpectrums(QdP - PdQ, Q2, dF, cv::DFT_COMPLEX_OUTPUT);
+      cv::Mat df(dF);
+      fftShift(df);
+      cv::idft(df, df, cv::DFT_COMPLEX_OUTPUT);
+      
+      std::vector< std::vector<cv::Mat> >  df_crvlts;
+      Curvelets::fdct(df, df_crvlts);
+      double low_subgradient(0.0), high_subgradient(0.0);
+      
+      for(unsigned int w = 0; w < df_crvlts.size(); ++w)
+      { 
+        for(auto s = 0; s < df_crvlts.at(w).size(); ++s)
+        {
+          cv::Mat signCrvlts, signCrvlts_;
+          if( f_crvlts.at(w).at(s).total() != cv::countNonZero(f_crvlts.at(w).at(s))) std::cout << "Zero value curvelet coefficients" << std::endl;
+          signCrvlts = cv::Mat::ones(f_crvlts.at(w).at(s).size(), f_crvlts.at(w).at(s).depth());
+          signCrvlts_ = cv::Mat::ones(f_crvlts.at(w).at(s).size(), f_crvlts.at(w).at(s).depth());
+          signCrvlts.setTo(-1, f_crvlts.at(w).at(s)<0.0);
+          signCrvlts_.setTo(-1, f_crvlts.at(w).at(s)<=0.0);
+          
+          cv::Mat A, A_;
+          cv::multiply(signCrvlts , df_crvlts.at(w).at(s), A);  //"sign" function considers zero as positive sign
+          cv::multiply(signCrvlts_, df_crvlts.at(w).at(s), A_);  //"sign_" function considers zero as negative sign
+          
+          low_subgradient += cv::sum(cv::min(A, A_)).val[0];
+          high_subgradient += cv::sum(cv::max(A, A_)).val[0];
+        }
+      }
+      g_reg.at<std::complex<double> >((j * M) + m, 0) = std::complex<double>(low_subgradient, high_subgradient);
+      if(low_subgradient != high_subgradient) std::cout << "Non smooth point!" << std::endl;
+      
+    }
+  }
+  }
+  //In the end, every dimension has lower and upper bound subgradient (lower bound could be equal to upper bound).
+*/

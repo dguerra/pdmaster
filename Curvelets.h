@@ -19,12 +19,12 @@ class Curvelets
   public:
     Curvelets();
     virtual ~Curvelets();
-    void fdct_wrapping(const cv::Mat& complexI, std::vector< vector<cv::Mat> >& c);
-    void ifdct_wrapping(std::vector< vector<cv::Mat> >& c, cv::Mat& complexI);
-    void fdct_wrapping_r2c(std::vector< std::vector<cv::Mat> >& c);
-    void fdct_wrapping_c2r(std::vector< std::vector<cv::Mat> >& c);
-    double l1_norm(const std::vector< vector<cv::Mat> >& c);
+    static void fdct(const cv::Mat& I, std::vector< vector<cv::Mat> >& c,  const bool& real_coeffs = true);
+    static void ifdct(std::vector< vector<cv::Mat> >& c, cv::Mat& complexI, int m, int n, const bool& real_coeffs = true);
+    static double l1_norm(const std::vector< vector<cv::Mat> >& c);
   private:
+    static void r2c(std::vector< std::vector<cv::Mat> >& c);
+    static void c2r(std::vector< std::vector<cv::Mat> >& c);
     std::vector< vector<cv::Mat> > c;
 };
 

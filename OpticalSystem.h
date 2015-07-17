@@ -15,8 +15,8 @@ public:
   OpticalSystem(const cv::Mat& phase, const cv::Mat& amplitude);
   virtual ~OpticalSystem();
   cv::Mat otf()const {return otf_;};
-  cv::Mat generalizedPupilFunction()const {return generalizedPupilFunction_;};
-  cv::Mat otfNormalizationFactor()const {return otfNormalizationFactor_;};
+  cv::Mat generalizedPupilFunction()const;
+  //cv::Mat otfNormalizationFactor()const {return otfNormalizationFactor_;};
 private:
   OpticalSystem();  //private default contructor, only parameters contructor is allowed
   void compute_OTF_(const cv::Mat& phase, const cv::Mat& amplitude, cv::Mat& otf);

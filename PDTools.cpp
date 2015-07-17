@@ -37,7 +37,6 @@ void partlyKnownDifferencesInPhaseConstraints(int M, int K, cv::Mat& Q2)
   ce.row(2) = cv::abs(ce.row(2));
   
   cv::Mat Q, R;
-  
   householder(ce.t(), Q, R);
   // extracts A columns, 1 (inclusive) to 3 (exclusive).
   //Mat B = A(Range::all(), Range(1, 3));
@@ -48,6 +47,7 @@ void partlyKnownDifferencesInPhaseConstraints(int M, int K, cv::Mat& Q2)
 
 void householder(const cv::Mat &m, cv::Mat &Q, cv::Mat &R)
 {
+  //#####Btter implement this!!!!!! :http://davidstutz.de/matrix-decompositions/matrix-decompositions/householder/demo
   if(m.cols>m.rows) throw CustomException("Assertion failed: cols<rows for QR decomposition");
   auto matrix_minor = [](cv::Mat x, int d) -> cv::Mat
   { //For d = 2, turns this into this:
@@ -460,7 +460,10 @@ void convolveDFT(const cv::Mat& imgOriginal, const cv::Mat& kernel, cv::Mat& out
   cv::dft(kernelPadded, kernelPadded_ft, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   cv::dft(source, input_ft, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   cv::mulSpectrums(input_ft, kernelPadded_ft.mul(kernelPadded.total()), output_ft, cv::DFT_COMPLEX_OUTPUT, corr);
-  cv::idft(output_ft, out, cv::DFT_REAL_OUTPUT);
+  
+  if(imgOriginal.channels() == 1 && kernel.channels() == 1) cv::idft(output_ft, out, cv::DFT_REAL_OUTPUT);
+  else cv::idft(output_ft, out, cv::DFT_COMPLEX_OUTPUT);
+  
   if(!full)
   {
     //colRange and rowRange are semi-open intervals. first included, last is not

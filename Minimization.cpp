@@ -80,20 +80,24 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
   {
     cv::Mat subdiff_constrained;
     cv::Mat subdiff(dfunc(Q2*x));
-    if(subdiff.channels() == 2)
+    
+    cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
+    if(subdiff.channels() == 1)
     {
-      cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
-      cv::split(subdiff, sd_bounds);
-      cv::Mat bounds_constrained[2];
-      bounds_constrained[0] = Q2.t() * sd_bounds[0];
-      bounds_constrained[1] = Q2.t() * sd_bounds[1];
-      cv::merge(bounds_constrained, 2, subdiff_constrained);
+      sd_bounds[0] = subdiff;
+      sd_bounds[1] = subdiff;
     }
-    else if(subdiff.channels() == 1)
+    else if(subdiff.channels() == 2)
     {
-      subdiff_constrained = Q2.t() * subdiff;
+      cv::split(subdiff, sd_bounds);
     }
     else throw CustomException("Minimization ERROR: Wrong subdifferential format.");
+    
+    cv::Mat bounds_constrained[2];
+    bounds_constrained[0] = Q2.t() * sd_bounds[0];
+    bounds_constrained[1] = Q2.t() * sd_bounds[1];
+    cv::merge(bounds_constrained, 2, subdiff_constrained);
+    
     return subdiff_constrained;
   };
     
@@ -108,22 +112,10 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
 int Minimization::descentDirection(const cv::Mat& subdifferential, const cv::Mat& Bt, const std::function<cv::Mat(cv::Mat, cv::Mat)>& sup_gp, cv::Mat& p, cv::Mat& gnew)
 {
   int success = 1;
-  if(subdifferential.channels() == 1)  //smooth case: only one subgradient value for each dimension
-  {
-    p = -Bt * subdifferential;
-    subdifferential.copyTo(gnew);
-    return success;
-  }
   
   cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
   cv::split(subdifferential, sd_bounds);
   
-  if( cv::checkRange(sd_bounds[0]-sd_bounds[1], true, nullptr, 0.0, 0.0) )  //diferentiable point within nonsmooth function
-  {
-    p = -Bt * sd_bounds[0];
-    sd_bounds[0].copyTo(gnew);
-    return success;
-  }
 
   //GetDescentDirection(TheMatrix &g, const vector<int> &hinges, vector<double> &hingebetas, TheMatrix & gnew, TheMatrix & p)
 	double gp = -1;
@@ -150,6 +142,7 @@ int Minimization::descentDirection(const cv::Mat& subdifferential, const cv::Mat
 
   gp_old = gnew.dot(p);
   gnew = sup_gp(subdifferential, p);
+  
   gp = gnew.dot(p);
 	best_gp = gp;
 
@@ -157,7 +150,6 @@ int Minimization::descentDirection(const cv::Mat& subdifferential, const cv::Mat
 	gap = gp_old;
 	min_M = gp - 0.5 * gap;
 	eps = min_M - 0.5 * gap;
-
 	while ((gp > 0.0 || eps > epsilonTol) && trynum < ITMAX) 
   {
 		double numerator;
@@ -200,6 +192,7 @@ int Minimization::descentDirection(const cv::Mat& subdifferential, const cv::Mat
 
 		// bound on Duality Gap
 		eps = min_M - 0.5 * gap;
+    std::cout << "eps: " << eps << std::endl;
 		trynum++;
 
    	std::cout << "mu: " << mu << "gp: " << gp << "eps: " << eps << "minM: " << min_M << std::endl;
@@ -207,14 +200,16 @@ int Minimization::descentDirection(const cv::Mat& subdifferential, const cv::Mat
 
 	if (trynum > 0) {
 		bestDir.copyTo(p);
+   // ga.copyTo(gnew);
 	}
 
 	// total dir findings: dirFinding += trynum;
-	if (best_gp > 0) {
+	if (best_gp >= 0) {
 	 	success = 0;
 	}
 	return success;
 }
+
 
 void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret, 
                           std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
@@ -230,13 +225,11 @@ void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret,
   //sup_gp function for testing
   std::function<cv::Mat(cv::Mat, cv::Mat)> sup_gp = [] (cv::Mat subdiff, cv::Mat dir) -> cv::Mat
   {
-    if(subdiff.channels() == 1) return subdiff;
-      
     cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
     cv::split(subdiff, sd_bounds);
     cv::Mat g = cv::Mat::zeros(dir.size(), dir.type());
-    cv::add(g, sd_bounds[0], g, dir>0);
-    cv::add(g, sd_bounds[1], g, dir<=0);
+    cv::add(g, sd_bounds[0], g, dir<0);
+    cv::add(g, sd_bounds[1], g, dir>=0);
     return g;
   };
   
@@ -244,50 +237,38 @@ void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret,
  	const double EPS = std::numeric_limits<double>::epsilon();
 	//const double TOLX = 4 * EPS;   //also std::sqrt(EPS)
 	const double TOLX = 3.0e-8;
+  const double h = 10.0e-8;
   
 	for (int its=0;its<ITMAX;its++)
   {
     iter = its;
-    descentDirection(subdifferential, hessin, sup_gp, xi, g);
+    if(descentDirection(subdifferential, hessin, sup_gp, xi, g) == 0){std::cout << "minimum reached: descent direction no found" << std::endl; return; }   //minimum reached;
     std::cout << "step " << iter << " to minimum. " << "fret: " << fret << std::endl << "p = " << p.t() << std::endl;
-
+    
     double den, fac, fad, fae, sumdg, sumxi;
     cv::Mat dg, hdg;
-    //we use linmin uses brent method inside to look for the minimum in 1D
-    //fret = brentLineSearch(p, xi, func);
-    fret = armijoWolfeLineSearch(p, xi, func, dfunc);
     cv::Mat temp;
 	  cv::Mat abs_p = cv::abs(p);
     abs_p.setTo(1.0, abs_p > 1.0);
-
 	  cv::divide(cv::abs(xi), abs_p, temp);
     //If all of temp elements are lower than TOLX, algorithm terminates
-    if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ){std::cout << "minimum reached" << std::endl; return; }   //minimum reached
+    //if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ){std::cout << "minimum reached: step lower than TOLX" << std::endl; return; }   //minimum reached
+    bool resLim(false);
+    fret = brentLineSearch(p, xi, func, resLim);
+    //fret = armijoWolfeLineSearch(p, xi, func, dfunc, resLim);
+    if(resLim) {std::cout << "minimum reached: reslution limit after line search." << std::endl; return; }   //minimum reached
 
 	  g.copyTo(dg);
     subdifferential = dfunc(p);
+    g = sup_gp(subdifferential, xi);
     
-    if(subdifferential.channels() == 2)
-    {
-      cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
-      cv::split(subdifferential, sd_bounds);
-      sd_bounds[1].copyTo(g);   //Select random subgradient from subdifferential set
-    }
-    else
-    {
-      subdifferential.copyTo(g);
-    }
     //Choose g, subgradient from subdifferential set such that: xi.t() * (g - dg) > 0;
-	  if( xi.dot(g-dg) <= 0) throw CustomException("FATAL ERROR: Secant condition not verified. Look further into this.");
+//    if( xi.dot(g-dg) <= 0) throw CustomException("FATAL ERROR: Secant condition not verified. Look further into this.");
 
-	  den = cv::max(fret, 1.0);
-	  cv::multiply(cv::abs(g), abs_p / den, temp);
-    
-    if( cv::checkRange(temp, true, nullptr, 0.0, gtol) ){std::cout << "minimum reached" << std::endl; return; }  //minimum reached
-    
 	  dg  = g - dg;
 	  hdg = hessin * dg;
-    
+
+    xi = xi + std::max(0.0, h - (xi.dot(dg)/dg.dot(dg)) ) * dg;
 	  fac = fae = sumdg = sumxi = 0.0;
     
     fac = dg.dot(xi);
@@ -303,86 +284,37 @@ void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret,
       
       hessin += fac * xi * xi.t() - fad * hdg * hdg.t() + fae * dg * dg.t();   //Updates inverse hessian
  	  }
+    else{std::cout << "whaaaaaat!" << std::endl; return;}
 	}
 	throw("too many iterations in dfpmin");
 }
 
-/*
-int Minimization::nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, cv::Mat &hessin, double &fret, 
-                           std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
-{
- 
-	const double EPS = std::numeric_limits<double>::epsilon();
-	//const double TOLX = 4 * EPS;   //also std::sqrt(EPS)
-	const double TOLX = 3.0e-8;
-  double den, fac, fad, fae, sumdg, sumxi;
-  cv::Mat dg, hdg;
-  //we use linmin uses brent method inside to look for the minimum in 1D
-  //fret = brentLineSearch(p, xi, func);
-  fret = armijoWolfeLineSearch(p, xi, func, dfunc);
-
-  cv::Mat temp;
-	cv::Mat abs_p = cv::abs(p);
-  abs_p.setTo(1.0, abs_p > 1.0);
-    
-	cv::divide(cv::abs(xi), abs_p, temp);
-  //If all of temp elements are lower than TOLX, algorithm terminates
-  if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ){std::cout << "minimum reached" << std::endl; return 1; }   //minimum reached
-  
-	g.copyTo(dg);
-	g = dfunc(p);
-  
-	den = cv::max(fret, 1.0);
-	cv::multiply(cv::abs(g), abs_p / den, temp);
-  
-  if ( cv::checkRange(temp, true, nullptr, 0.0, gtol) ){std::cout << "minimum reached" << std::endl; return 1; }  //minimum reached
-    
-	dg  = g - dg;
-	hdg = hessin * dg;
-    
-	fac = fae = sumdg = sumxi = 0.0;
-    
-  fac = dg.dot(xi);
-	fae = dg.dot(hdg);
-	sumdg = dg.dot(dg);
-	sumxi = xi.dot(xi);
-
-	if (fac > std::sqrt(EPS * sumdg * sumxi))
-  {
-		fac = 1.0/fac;
-		fad = 1.0/fae;
-		dg = fac * xi - fad * hdg;   //Vector that makes BFGS different form DFP method
-      
-    hessin += fac * xi * xi.t() - fad * hdg * hdg.t() + fae * dg * dg.t();
- 	}
-    		
-	xi = -hessin * g;
-  return 0;   //minumum not found yet
-}
-*/
-double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
+double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc, bool &resolutionLimit)
 { 
+  
+  resolutionLimit = false;
+    //sup_gp function for testing
+  std::function<cv::Mat(cv::Mat, cv::Mat)> sup_gp = [] (cv::Mat subdiff, cv::Mat dir) -> cv::Mat
+  {
+    cv::Mat sd_bounds[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
+    cv::split(subdiff, sd_bounds);
+    cv::Mat g = cv::Mat::zeros(dir.size(), dir.type());
+    cv::add(g, sd_bounds[0], g, dir<0);
+    cv::add(g, sd_bounds[1], g, dir>=0);
+    return g;
+  };
+  
   //Helpter function that turns a multidimensional functor into 1-dim, through point p and direction xi on function func
   auto F1dim = [] (const double &x, const cv::Mat &p, const cv::Mat &xi, const std::function<double(cv::Mat)> &func) -> double
   { //could be implemented through function adaptors, read more about it
     return func(p + x * xi);
   };
   //gradient from point p, through line xi, projected onto direction search xi
-  auto Df1dim = [] (const double &x, const cv::Mat &p, const cv::Mat &xi, std::function<cv::Mat(cv::Mat)> &dfunc) -> double
+  auto Df1dim = [sup_gp] (const double &x, const cv::Mat &p, const cv::Mat &xi, std::function<cv::Mat(cv::Mat)> &dfunc) -> double
   { //could be implemented through function adaptors, read more about it
     cv::Mat subdiff1dim = dfunc(p + x * xi);
-    cv::Mat g1d;
-    if(subdiff1dim.channels() == 2)
-    {
-      cv::Mat sd_bounds1d[2];   //Split subdifferential set into its bounds (range begin and end of each dimension)
-      cv::split(subdiff1dim, sd_bounds1d);
-      sd_bounds1d[0].copyTo(g1d);
-    }
-    else if(subdiff1dim.channels() == 1)
-    {
-      subdiff1dim.copyTo(g1d);
-    }
-    return g1d.dot(xi);
+    cv::Mat gnew = sup_gp(subdiff1dim, xi);    
+    return gnew.dot(xi);
   };
   
   std::function<double(double)> f1dim = std::bind(F1dim, std::placeholders::_1, p, xi, func);
@@ -390,7 +322,7 @@ double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::functio
   
   bool done(false);
   double C1 = 1e-4, C2 = 0.9;    //orignal configuration
-  //double C1 = 1e-7, C2 = 0.99999;
+  //double C1 = 0.1, C2 = 0.2;
   
   double alpha = 0.0;		/* lower bound on step length*/
   double beta_max = 1e100;	/* upper bound on step length*/
@@ -402,6 +334,7 @@ double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::functio
   double dnorm = cv::norm(xi, cv::NORM_L2);
   
   int nbisectmax(30), nexpandmax(30);
+  
   if (0.0 == dnorm)
   {
     nbisectmax = 100;
@@ -415,6 +348,9 @@ double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::functio
     if (nexpandmax < 100) nexpandmax = 100;
   }
 
+  nbisectmax = 100000;
+  nexpandmax = 100000;
+  
   double f0 = f1dim(0.0);
   double g0 = df1dim(0.0);     //first gradient porjected onto search direction xi
     
@@ -434,24 +370,34 @@ double Minimization::armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::functio
     if (beta < beta_max) 
     {
       if (nbisect < nbisectmax) {t = (alpha + beta) / 2; nbisect++;}
-      else done = true;
+      else 
+      {
+        done = true; std::cout << "Fail to satisfy armijo wolfe conditions" << std::endl; 
+        std::cout << "at p=" << p << " and dir_xi=" << xi << std::endl;
+        throw CustomException("Error: Fail to satisfy armijo wolfe conditions");
+      }
     }
     else
     {
       if (nexpand < nexpandmax) {t = 2 * alpha; nexpand++;}
-      else done = true;  //Expansion bigger than expandmax
+      else 
+      {
+        done = true; std::cout << "Fail to satisfy armijo wolfe conditions" << std::endl; 
+        std::cout << "at p=" << p << " and dir_xi=" << xi << std::endl;
+        throw CustomException("Error: Fail to satisfy armijo wolfe conditions");
+      }  //Expansion bigger than expandmax
     }
   }
 
   xi = xi * t;
   p = p + xi;
-
-  return f1dim(t);
-  //return f;
+  if( t <= 1e-8 ) resolutionLimit = true;
+  return f;
 }
 
-double Minimization::brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func)
+double Minimization::brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, bool &resolutionLimit)
 {
+  resolutionLimit = false;
   //Helpter function that turns a multidimensional functor into 1-dim, through point p and direction xi on function func
   auto F1dim = [] (const double &x, const cv::Mat &p, const cv::Mat &xi, const std::function<double(cv::Mat)> &func) -> double
   { //could be implemented through function adaptors, read more about it
@@ -466,6 +412,7 @@ double Minimization::brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<doub
   xi = xi * xmin;
   p = p + xi;
 
+  //if( xmin <= 1e-21 ) resolutionLimit = true;
 	return fmin;
 }
 
@@ -619,5 +566,3 @@ void Minimization::bracket(const double& a, const double& b, std::function<doubl
 	}
     
 }
-
-

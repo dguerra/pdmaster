@@ -33,10 +33,19 @@ void OpticalSystem::compute_OTF_(const cv::Mat& phase, const cv::Mat& amplitude,
   if (phase.channels() == 1 && amplitude.channels() == 1 && phase.size() == amplitude.size() && phase.type() == amplitude.type())
   {
     compute_GeneralizedPupilFunction_(phase, amplitude, generalizedPupilFunction_);
-    cv::Mat unnormalizedOTF = crosscorrelation(generalizedPupilFunction_, generalizedPupilFunction_);
+    //cv::Mat unnormalizedOTF = crosscorrelation(generalizedPupilFunction_, generalizedPupilFunction_);
+    
+    cv::Mat unnormalizedOTF;
+    bool full(true), corr(true);
+    convolveDFT(generalizedPupilFunction_, generalizedPupilFunction_, unnormalizedOTF, corr, full);
+    cv::copyMakeBorder(unnormalizedOTF, unnormalizedOTF, 1, 0, 1, 0, cv::BORDER_CONSTANT);
+    fftShift(unnormalizedOTF);
+    
+    
     //Normalize to be have 1 at oringen of the otf
-    cv::Mat otfNormalizationFactor_ = cv::repeat(unnormalizedOTF.col(0).row(0), unnormalizedOTF.rows, unnormalizedOTF.cols);
-    divSpectrums(unnormalizedOTF, otfNormalizationFactor_, otf, cv::DFT_COMPLEX_OUTPUT);
+    otfNormalizationFactor_ = unnormalizedOTF.col(0).row(0).clone();
+    cv::Mat mfactor = cv::repeat(otfNormalizationFactor_, unnormalizedOTF.rows, unnormalizedOTF.cols);
+    divSpectrums(unnormalizedOTF, mfactor, otf, cv::DFT_COMPLEX_OUTPUT);
   }
   else
   {
@@ -69,3 +78,12 @@ void OpticalSystem::compute_GeneralizedPupilFunction_(const cv::Mat& phase, cons
     throw CustomException("computeGeneralizedPupilFunction_: Unsuported type, must be single channel.");
   }
 }
+
+cv::Mat OpticalSystem::generalizedPupilFunction()const
+{
+  //cv::Mat mfactor = cv::repeat(otfNormalizationFactor_, generalizedPupilFunction_.rows, generalizedPupilFunction_.cols);
+  //cv::Mat normGeneralizedPupilFunction;
+  //divSpectrums(generalizedPupilFunction_, mfactor, normGeneralizedPupilFunction, cv::DFT_COMPLEX_OUTPUT);
+  return generalizedPupilFunction_;
+}
+

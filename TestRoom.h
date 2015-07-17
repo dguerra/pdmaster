@@ -13,12 +13,16 @@ template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize);
 bool test_curveLab();
 bool test_singleCurvelet();
+bool test_curveletDemoDenoise();
+bool test_simpleCurveletsRegularization();
 void test_noiseFilter();
 void test_generizedPupilFunctionVsOTF();
 void test_udwd_spectrums();
 void test_zernike_wavelets_decomposition();
 void test_wavelet_zernikes_decomposition();
 void test_getNM();
+bool test_NORM_L1();
+bool test_convolveDFT_vs_crosscorrelation();
 bool test_shift();
 void test_conv_flaw();
 void test_wavelets();

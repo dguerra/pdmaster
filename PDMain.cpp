@@ -23,10 +23,9 @@ int main()
   try
   {
     SubimageLayout subimageLayout;
-//    subimageLayout.navigateThrough();
     subimageLayout.computerGeneratedImage();
-//    test_nonsmoothMinimization();
-    //test_curveLab();
+    
+    //test_simpleCurveletsRegularization();
   }
   catch (cv::Exception const & e)
   {

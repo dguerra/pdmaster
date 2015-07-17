@@ -23,10 +23,13 @@ public:
   void characterizeOpticalSystem(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, std::vector<OpticalSystem>& OS);
   void computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, 
                 const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& Q);
-  //void computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase,
-    //                  const std::vector<double>& meanPowerNoise, std::vector<OpticalSystem>& OS, cv::Mat& P);
+  void compute_dQ(const std::vector<cv::Mat>& D, const cv::Mat& zernikeBase, 
+                        const std::vector<OpticalSystem>& OS, cv::Mat& dQ);
   void computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase,
                       const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& P);  
+  void compute_dP(const std::vector<cv::Mat>& D, const cv::Mat& zernikeElement, 
+                        const std::vector<OpticalSystem>& OS, cv::Mat& dP);
+  void compute_dSj(const OpticalSystem& osj, const cv::Mat& zernikeElement, cv::Mat& dSj);
   double objectiveFunction(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise);
   void noiseFilter(const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                    const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, const cv::Mat& P, const cv::Mat& Q, cv::Mat& filter);

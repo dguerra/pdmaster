@@ -37,9 +37,9 @@ public:
   
   double brent(std::function<double(double)> &func);
   
-  double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func);
+  double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, bool &resolutionLimit);
   
-  double armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
+  double armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc, bool &resolutionLimit);
 
   //Both annalitical expressions are supplied: objective function and gradient
   void dfpmin(cv::Mat &p, int &iter, double &fret, 
@@ -63,7 +63,7 @@ private:
 	const double tol = 3.0e-8;   //Precision at which the minimum is found
   const double gtol = 3.0e-8;   //Precision gradient at which the minimum is found
   
-  const int ITMAX = 200;  //maximum number of steps to reach the minimum
+  const int ITMAX = 600;  //maximum number of steps to reach the minimum
 
 };
 

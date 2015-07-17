@@ -15,7 +15,7 @@
 //#include "FITS.h"
 #include "Metric.h"
 #include "Minimization.h"
-
+#include <fstream>
 //ANEXO
 //How to get with python null space matrix from constraints, Q2
 //import scipy
@@ -79,6 +79,11 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   int K = D.size();
   cv::Mat Q2;
   partlyKnownDifferencesInPhaseConstraints(M, K, Q2);
+  
+  //Used this: http://davidstutz.de/matrix-decompositions/matrix-decompositions/householder/demo
+  //double q2_oneCoeff[] = {0, 0, 0, -0.70710678118655, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.70710678118655, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+  //Q2 = cv::Mat(K*M, 1, cv::DataType<double>::type, q2_oneCoeff);
+  
   //p: initial point; Q2: null space of constraints; objFunction: function to be minimized; gradFunction: first derivative of objFunction 
   cv::Mat p = cv::Mat::zeros(M*K, 1, cv::DataType<double>::type);
   
