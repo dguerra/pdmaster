@@ -9,7 +9,6 @@
 #include "PDTools.h"
 #include "TelescopeSettings.h"
 #include "Zernikes.h"
-#include "Zernikes.cpp"
 
 
 NoiseFilter::NoiseFilter()
@@ -56,10 +55,9 @@ NoiseFilter::NoiseFilter(const cv::Mat& T0, const cv::Mat& Tk, const cv::Mat& D0
   H.setTo(0, H < filter_lower_limit);
   H.setTo(filter_upper_limit, H > filter_upper_limit);
 
-  
   //To zero-out frequencies beyond cutoff
   TelescopeSettings tsettings(T0.cols);
-  H.setTo(0, Zernikes<double>::phaseMapZernike(1, H.cols, tsettings.cutoffPixel()) == 0);
+  H.setTo(0, Zernikes::phaseMapZernike(1, H.cols, tsettings.cutoffPixel()) == 0);
   
   //select only the central lobe of the filter when represented in the frequency domain
   // Find total markers

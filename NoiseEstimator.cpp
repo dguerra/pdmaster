@@ -6,7 +6,7 @@
 #include "NoiseEstimator.h"
 #include "TelescopeSettings.h"
 #include "Zernikes.h"
-#include "Zernikes.cpp"
+#include "FITS.h"
 
 NoiseEstimator::NoiseEstimator()
 {
@@ -46,31 +46,33 @@ void NoiseEstimator::meanPowerSpectrum(const cv::Mat& img)
 {
   if (img.channels() == 1)
   {
-    cv::Mat imgF;
-
+    cv::Mat IMG;
     //CAUTION: The result of the dft is explicitly scaled, so the sigma value might change
-    cv::dft(img,imgF,cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-
-    cv::Mat absImgF = absComplex(imgF);
-    cv::Mat powerSpectrum = absImgF.mul(absImgF);
+    cv::dft(img, IMG, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+    fftShift(IMG);
+    bool conjB(true);
+  
+    cv::Mat powerSpectrum;
+    cv::mulSpectrums(IMG, IMG, powerSpectrum, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE, conjB);
     //A mask has to be applied to before calculating the sigma
-    unsigned long imgSize = img.cols;
-    TelescopeSettings tsettings(imgSize);
-
-    cv::Mat mask = cv::Mat::ones(powerSpectrum.size(), powerSpectrum.type());
+    TelescopeSettings tsettings(img.cols);
+    std::cout << "cutoffPixel: " << tsettings.cutoffPixel() << std::endl;
+    cv::Mat mask = cv::Mat::ones(powerSpectrum.size(), powerSpectrum.depth());
 
     //Mask to onlyu consider pixel values after cutoff, which are due to noise only
-    mask.setTo(0, Zernikes<double>::phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
+    mask.setTo(0, Zernikes::phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
+    //mask.setTo(0, Zernikes::phaseMapZernike(1, mask.cols, mask.cols/2) != 0);
     mask.colRange(int((mask.cols/2)-(mask.cols/6)),int((mask.cols/2)+(mask.cols/6))) = cv::Scalar(0);
     mask.rowRange(int((mask.rows/2)-(mask.rows/6)),int((mask.rows/2)+(mask.rows/6))) = cv::Scalar(0);
 
     //CAUTION: Remember to shift quadrants before applying circle mask to fourier domain!!
-    cv::Mat powerSpectrumShifted;
-    shift(powerSpectrum, powerSpectrumShifted, powerSpectrum.cols/2, powerSpectrum.rows/2);
-    meanPower_ = cv::sum(powerSpectrumShifted.mul(mask)).val[0]/cv::countNonZero(mask);
-    sigma2_ = img.total() * meanPower_;
+    cv::Mat croppedSpectrums = (splitComplex(powerSpectrum).first).mul(mask);
+    meanPower_ = cv::sum(croppedSpectrums).val[0]/cv::sum(mask).val[0];
+    sigma2_ = meanPower_ * img.total() ;
     sigma_ = std::sqrt(sigma2_);
-    //CAUTION!! noiseGamma = (noiseSigmaD0/noiseSigmaDk)^2 = avgPowerD0/avgPowerDk
+    //sigma_ = img.cols * std::sqrt(meanPower_); //cd m                     ;(Append.K) 
+    std::cout << "cv::mean(img): " << cv::mean(img) << std::endl;
+    std::cout << "sigma = " << sigma_ << " represents " << sigma_/(cv::mean(img)/100.0) << "% of the average intensity." << std::endl;
   }
   else
   {

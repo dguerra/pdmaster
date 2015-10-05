@@ -15,6 +15,7 @@ bool test_curveLab();
 bool test_singleCurvelet();
 bool test_curveletDemoDenoise();
 bool test_simpleCurveletsRegularization();
+bool test_LinearizedBregmanAlgorithmDenoising();
 void test_noiseFilter();
 void test_generizedPupilFunctionVsOTF();
 void test_udwd_spectrums();

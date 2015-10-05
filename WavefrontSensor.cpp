@@ -8,9 +8,8 @@
 #include "WavefrontSensor.h"
 //#include "CustomException.h"
 #include "Zernikes.h"
-#include "Zernikes.cpp"
 //#include <cmath>
-//#include "PDTools.h"
+#include "PDTools.h"
 #include "TelescopeSettings.h"
 //#include "FITS.h"
 #include "Metric.h"
@@ -67,8 +66,8 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   std::cout << "pupilRadiousPixels: " << tsettings.pupilRadiousPixels() << std::endl;
   
   //double pupilRadiousP = tsettings.pupilRadiousPixels();
-  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
-  std::vector<cv::Mat> zBase = Zernikes<double>::zernikeBase(numberOfZernikes, d_size.width, tsettings.pupilRadiousPixels());
+  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
+  std::vector<cv::Mat> zBase = Zernikes::zernikeBase(numberOfZernikes, d_size.width, tsettings.pupilRadiousPixels());
   
   Metric mm;
   //Objective function and gradient of the objective function
@@ -87,9 +86,39 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   //p: initial point; Q2: null space of constraints; objFunction: function to be minimized; gradFunction: first derivative of objFunction 
   cv::Mat p = cv::Mat::zeros(M*K, 1, cv::DataType<double>::type);
   
+  
   Minimization minimizationKit;
   minimizationKit.minimize(p, Q2, func, dfunc);
   std::cout << "mimumum: " << p.t() << std::endl;
 
   return mm.F();
+}
+
+void WavefrontSensor::ista(cv::Mat& u,  const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& grad)
+{
+  double t(1.0);
+  double lambda(0.0001);
+  auto shrink = [] (const double& x, const double& alpha) -> double
+  {
+    //return std::copysign(1.0, y) * std::max( std::abs(y)-alpha, 0.0);
+    return std::copysign(1.0, x) * std::abs(x)-alpha;
+  };
+  cv::Mat y;
+  u.copyTo(y);
+  for(unsigned int hh = 0; hh<1000; ++hh)
+  {
+    std::cout << "func(u): " << func(u) << std::endl; 
+    cv::Mat new_u = y - (splitComplex(grad(y)).first).mul(t);
+    cv::Mat diff = new_u - u;
+    new_u.copyTo(u);   //gradient at point u
+    for(unsigned int i = 0; i<u.total(); ++i)
+    {
+      u.at<double>(0,i) = shrink(u.at<double>(0,i), lambda*t);
+    }
+    
+    t = ( 1.0 + std::sqrt(1.0+(4*t*t)) )/2.0;
+    y = u + ((t-1.0)/t)*(diff);
+  }
+  
+  std::cout << "u: " << u << std::endl; 
 }

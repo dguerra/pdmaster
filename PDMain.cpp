@@ -14,18 +14,20 @@
 #include "PDTools.h"
 
 #include "Zernikes.h"
-#include "WaveletTransform.h"
 #include <chrono>
 #include <cmath>
+#include "CompressedSensing.h"
 
 int main()
-{  
+{
   try
   {
+    
     SubimageLayout subimageLayout;
     subimageLayout.computerGeneratedImage();
-    
-    //test_simpleCurveletsRegularization();
+
+    //subimageLayout.navigateThrough();
+    //iterativeHardThresholding();
   }
   catch (cv::Exception const & e)
   {
@@ -34,4 +36,3 @@ int main()
 
   return 0;
 }
-

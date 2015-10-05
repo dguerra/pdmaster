@@ -32,8 +32,8 @@ void readFITS(const std::string& fitsname, cv::Mat& cvImage)
   double bscale_ = 1.0, bzero_ = 0.0;
   fits_set_bscale(fptr,  bscale_, bzero_, &status);
   int bitpix, naxis;
-  int maxdim(2);
-  long naxes[] = {1, 1};
+  int maxdim(3);
+  long naxes[] = {1,1, 1};
 
   fits_get_img_param(fptr, maxdim,  &bitpix, &naxis, naxes, &status);
   if (status)
@@ -44,39 +44,72 @@ void readFITS(const std::string& fitsname, cv::Mat& cvImage)
     std::cout << "readFITS: Unable to get params from FITS." << std::endl;
     throw  CustomException("readFITS: Unable to get params from FITS.");
   }
-  if(naxis != 2)
+  
+  if(naxis == 2)
   {
-    throw CustomException("readFITS: Wrong number of dimensions in FITS file. Only two dims image supported.");
+    //  TBYTE, TSBYTE, TSHORT, TUSHORT, TINT, TUINT, TLONG, TLONGLONG, TULONG, TFLOAT, TDOUBLE
+    long fpixel[] = {1, 1};
+    long lpixel[] = {naxes[0], naxes[1]};
+    long inc[] = {1, 1};
+    long nelements = naxes[0] * naxes[1];
+    double *array = new double[nelements];
+
+    fits_read_subset(fptr, TDOUBLE, fpixel, lpixel, inc, nullptr,  array, nullptr, &status);
+    if (status)
+    {
+      fits_report_error(stdout, status);
+      fits_get_errstatus(status,err_text);
+      fptr = nullptr;
+      delete[] array;
+      throw  CustomException("readFITS: Unable to read the fits file.");
+    }
+
+    //it seems cfitsio interprets image axes in the oppsite way of opencv
+    cvImage = cv::Mat(naxes[1], naxes[0], cv::DataType<double>::type, array);
+
+    fits_close_file(fptr, &status);
+    if (status)
+    {
+      fits_report_error(stdout, status);
+      fits_get_errstatus(status,err_text);
+      fptr = nullptr;
+      delete[] array;
+      throw  CustomException("readFITS: Cannot close fits file.");
+    } 
   }
-
-  //  TBYTE, TSBYTE, TSHORT, TUSHORT, TINT, TUINT, TLONG, TLONGLONG, TULONG, TFLOAT, TDOUBLE
-  long fpixel[] = {1, 1};
-  long lpixel[] = {naxes[0], naxes[1]};
-  long inc[] = {1, 1};
-  long nelements = naxes[0] * naxes[1];
-  double *array = new double[nelements];
-
-  fits_read_subset(fptr, TDOUBLE, fpixel, lpixel, inc, nullptr,  array, nullptr, &status);
-  if (status)
+  
+  if(naxis == 3)
   {
-    fits_report_error(stdout, status);
-    fits_get_errstatus(status,err_text);
-    fptr = nullptr;
-    delete[] array;
-    throw  CustomException("readFITS: Unable to read the fits file.");
-  }
+     //  TBYTE, TSBYTE, TSHORT, TUSHORT, TINT, TUINT, TLONG, TLONGLONG, TULONG, TFLOAT, TDOUBLE
+    long layer = 29;   //Only consider the first layer
+    long fpixel[] = {1, 1, layer};
+    long lpixel[] = {naxes[0], naxes[1], layer};
+    long inc[] = {1, 1, 1};
+    long nelements = naxes[0] * naxes[1];
+    double *array = new double[nelements];
 
-  //it seems cfitsio interprets image axes in the oppsite way of opencv
-  cvImage = cv::Mat(naxes[1], naxes[0], cv::DataType<double>::type, array);
+    fits_read_subset(fptr, TDOUBLE, fpixel, lpixel, inc, nullptr,  array, nullptr, &status);
+    if (status)
+    {
+      fits_report_error(stdout, status);
+      fits_get_errstatus(status,err_text);
+      fptr = nullptr;
+      delete[] array;
+      throw  CustomException("readFITS: Unable to read the fits file.");
+    }
 
-  fits_close_file(fptr, &status);
-  if (status)
-  {
-    fits_report_error(stdout, status);
-    fits_get_errstatus(status,err_text);
-    fptr = nullptr;
-    delete[] array;
-    throw  CustomException("readFITS: Cannot close fits file.");
+    //it seems cfitsio interprets image axes in the oppsite way of opencv
+    cvImage = cv::Mat(naxes[1], naxes[0], cv::DataType<double>::type, array);
+
+    fits_close_file(fptr, &status);
+    if (status)
+    {
+      fits_report_error(stdout, status);
+      fits_get_errstatus(status,err_text);
+      fptr = nullptr;
+      delete[] array;
+      throw  CustomException("readFITS: Cannot close fits file.");
+    } 
   }
 }
 

@@ -16,6 +16,7 @@ public:
   virtual ~TelescopeSettings();
   double pupilRadiousPixels()const{return pupilRadiousPixels_;};
   double cutoffPixel()const{return cutoffPixel_;};
+  double k() const {return k_;};
   void imageSize(const unsigned long& imgSize){imageSize_ = imgSize;};
 private:
   double workingLambda_;  //(meters)
@@ -24,6 +25,9 @@ private:
   unsigned long imageSize_;
   double pupilRadiousPixels_;
   double cutoffPixel_;
+  double defocusTranslationAlongOpticalAxis_;  // (meters)
+  double focalLength_;  //(meters)
+  double k_;   //RMS defocus coefficienct
 };
 #endif /* TELESCOPESETTINGS_H_ */
 

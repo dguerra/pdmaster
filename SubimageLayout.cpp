@@ -11,15 +11,13 @@
 #include "OpticalSystem.h"
 #include "FITS.h"
 #include "Zernikes.h"
-#include "Zernikes.cpp"
 #include "TelescopeSettings.h"
 #include "ImageQualityMetric.h"
 #include "PDTools.h"
-#include "Fusion.h"
 
 SubimageLayout::SubimageLayout()
 {
-  subimageSize_ = 128;  //size of the box to be analized
+  subimageSize_ = 42; //70; //56; //size of the box to be analized
   subimageStepXSize_ = 0;
   subimageStepYSize_ = 0;
   apodizationPercent_ = 12.5;
@@ -34,7 +32,7 @@ SubimageLayout::~SubimageLayout()
 void SubimageLayout::computerGeneratedImage()
 {
   //Benchmark
-  int isize = 128;
+  int isize = 80; //128;
   cv::Mat img;
   if(true)
   {
@@ -49,27 +47,19 @@ void SubimageLayout::computerGeneratedImage()
     cv::normalize(img, img, 0, 1, CV_MINMAX);
     std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
   }
-  if(false)
-  {
-    img = cv::Mat::zeros(cv::Size(isize, isize), cv::DataType<double>::type);
-    //by default int thickness=1, int lineType=8, int shift=0
-    int quarter = isize/4;
-    cv::circle(img, cv::Point(quarter,quarter), 10, cv::Scalar(1), -1);
-    cv::circle(img, cv::Point(3*quarter,quarter), 10, cv::Scalar(1), -1);
-    cv::circle(img, cv::Point(quarter,3*quarter), 10, cv::Scalar(1), -1);
-    cv::circle(img, cv::Point(3*quarter,3*quarter), 10, cv::Scalar(1), -1);
-    cv::normalize(img, img, 0, 1, CV_MINMAX);
-  }
-  
+
   cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
   cv::Mat complexI;
   cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
 
   cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   fftShift(complexI);
-   
-  double pupilRadious = 32.5011;
-  double pupilSideLength = isize/2;
+
+  TelescopeSettings ts(isize);
+  
+  double pupilRadious = ts.pupilRadiousPixels(); // 32.5011;
+  std::cout << "pupilRadious: " << pupilRadious << std::endl;
+  double pupilSideLength = isize;
 
   int K = 2;
   int M = 14;
@@ -82,24 +72,25 @@ void SubimageLayout::computerGeneratedImage()
   
   cv::Mat coeffs(K*M, 1, cv::DataType<double>::type, data);
   
-  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, pupilSideLength, pupilRadious);
+  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, pupilRadious);
   
   ////////Consider the case of two diversity images
-  std::vector<double> diversityFactor = {0.0, -2.21209};
-  cv::Mat z4 = Zernikes<double>::phaseMapZernike(4, pupilSideLength, pupilRadious);
-  double z4AtOrigen = Zernikes<double>::pointZernike(4, 0, 0);
+  std::vector<double> diversityFactor = {0.0, ts.k()};
+  cv::Mat z4 = Zernikes::phaseMapZernike(4, pupilSideLength, pupilRadious);
+  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
   std::vector<cv::Mat> diversityPhase;
   for(double dfactor : diversityFactor)
   {
     //defocus zernike coefficient: c4 = dfactor * PI/(2.0*std::sqrt(3.0))
 	  diversityPhase.push_back( (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen));
+    //diversityPhase.push_back(dfactor * z4);
   }
   ////////
   
   std::vector<OpticalSystem> OS;
   for(int k=0; k<K; ++k)
   {  //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
-    cv::Mat pupilPhase_i = Zernikes<double>::phaseMapZernikeSum(pupilSideLength,pupilRadious, coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
+    cv::Mat pupilPhase_i = Zernikes::phaseMapZernikeSum(pupilSideLength,pupilRadious, coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
     OS.push_back(OpticalSystem(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
   }
    
@@ -110,8 +101,12 @@ void SubimageLayout::computerGeneratedImage()
   fftShift(otf2);
   
   cv::mulSpectrums(selectCentralROI(otf1, complexI.size()), complexI.mul(complexI.total()), d1, cv::DFT_COMPLEX_OUTPUT);
+  //writeFITS(absComplex(d1), "../d1_before.fits");
   cv::mulSpectrums(selectCentralROI(otf2, complexI.size()), complexI.mul(complexI.total()), d2, cv::DFT_COMPLEX_OUTPUT);
-
+  d1.setTo(0.0, Zernikes::phaseMapZernike(1, d1.cols, ts.cutoffPixel()) == 0);   //take out frequencies above cutoff
+  //writeFITS(absComplex(d1), "../d1_aftercut.fits");
+  d2.setTo(0.0, Zernikes::phaseMapZernike(1, d2.cols, ts.cutoffPixel()) == 0);   //take out frequencies above cutoff
+  
   fftShift(d1);
   fftShift(d2);
   cv::idft(d1, d1, cv::DFT_REAL_OUTPUT);
@@ -119,7 +114,7 @@ void SubimageLayout::computerGeneratedImage()
   
   cv::Mat noise1(isize, isize, cv::DataType<double>::type);
   cv::Mat noise2(isize, isize, cv::DataType<double>::type);
-  cv::Scalar sigma(0.2), m_(0);
+  cv::Scalar sigma(0.26), m_(0);
   
   cv::theRNG() = cv::RNG( time (0) );
   cv::randn(noise1, m_, sigma);
@@ -141,26 +136,23 @@ void SubimageLayout::computerGeneratedImage()
   cv::Scalar mssimd2 = iqm.mssim(img, d2_n);
   std::cout << "MSSIM d2: " << mssimd2.val[0] << std::endl;
   
-  //cv::Scalar imageD1Offset = cv::sum(d1)/cv::Scalar(d1.total());
-  //cv::Scalar imageD2Offset = cv::sum(d2)/cv::Scalar(d2.total());
-  
   WavefrontSensor wSensor;
   std::vector<cv::Mat> d = {d1, d2};
-  double meanPower = (sigma.val[0]*sigma.val[0])/d1.total();
-  std::vector<double> meanPowerNoise = {meanPower, meanPower};   //supposed same noise in both images
+  
+  NoiseEstimator noiseFocused, noiseDefocused;
+  noiseFocused.meanPowerSpectrum(d1);
+  noiseDefocused.meanPowerSpectrum(d2);
+  
+  //double meanPower = (sigma.val[0]*sigma.val[0])/d1.total();
+  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
   cv::Mat object = wSensor.WavefrontSensing(d, meanPowerNoise);
   fftShift(object);
   cv::idft(object, object, cv::DFT_REAL_OUTPUT);
   cv::normalize(object, object, 0, 1, CV_MINMAX);
  
-  //writeFITS(object, "../object.fits");
-  //writeFITS(d1, "../d1.fits");
-  //writeFITS(d2, "../d2.fits");
-  //writeFITS(img, "../img.fits");
-  
   cv::Scalar mssimIndex = iqm.mssim(img, object);
   std::cout << "MSSIM obj: " << mssimIndex.val[0] << std::endl;
-  
+
 }
 
 void SubimageLayout::navigateThrough()
@@ -168,27 +160,35 @@ void SubimageLayout::navigateThrough()
   //Real dataset
   //nextSubimage()
   //The following actions should be done by the class in every sub-image
-  cv::Mat dat, img;
-  readFITS("../inputs/pd.004.fits", dat);
-  dat.convertTo(img, cv::DataType<double>::type);
+  cv::Mat dat1, dat2, img1, img2;
+  readFITS("../inputs/sfoc.fits", dat1);
+  readFITS("../inputs/sout.fits", dat2);
+  dat1.convertTo(img1, cv::DataType<double>::type);
+  dat2.convertTo(img2, cv::DataType<double>::type);
 
-  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
+  std::cout << "cols: " << img1.cols << " x " << "rows: " << img1.rows << std::endl;
 
-  int X(100),Y(100);
-  cv::Rect rect1(X, Y, subimageSize_, subimageSize_);
-  cv::Rect rect2(936+X, 0+Y, subimageSize_, subimageSize_);
-
-  cv::Mat d0 = img(rect1).clone();
-  cv::Mat dk = img(rect2).clone();
-
-  cv::Mat d0_norm;
-  cv::normalize(d0, d0_norm, 0, 1, CV_MINMAX);
-//  cv::imshow("d0", d0_norm);
+  long upperTopCorner = 26;
+  subimageSize_ = 42; //70; //56; //size of the box to be analized
+  cv::Rect rect(upperTopCorner, upperTopCorner, subimageSize_, subimageSize_);
 
   NoiseEstimator noiseFocused, noiseDefocused;
-  noiseFocused.meanPowerSpectrum(d0);
-  noiseDefocused.meanPowerSpectrum(dk);
-
+  noiseFocused.meanPowerSpectrum(img1);
+  noiseDefocused.meanPowerSpectrum(img2);
+  
+  cv::Mat d0 = img1(rect).clone();
+  cv::Mat dk = img2(rect).clone(); 
+  //writeFITS(d0, "../d0.fits");
+  //writeFITS(dk, "../dk.fits");
+  //cv::normalize(d0, d0);
+  //cv::normalize(dk, dk);
+  std::cout << "cv::mean(d0): " << cv::mean(d0).val[0] << std::endl;
+  std::cout << "cv::mean(dk): " << cv::mean(dk).val[0] << std::endl;
+  //d0 = d0-cv::mean(d0);
+  //dk = dk-cv::mean(dk);
+  //cv::normalize(d0, d0, 0, 1, CV_MINMAX);
+  //cv::normalize(dk, dk, 0, 1, CV_MINMAX);
+  
   std::cout << "noiseDefocused.sigma(): " << noiseDefocused.sigma() << std::endl;
   std::cout << "noiseFocused.sigma(): " << noiseFocused.sigma() << std::endl;
 
@@ -199,8 +199,14 @@ void SubimageLayout::navigateThrough()
   cv::Scalar imageDkOffset = cv::sum(dk.mul(apodizationWindow))/cv::sum(apodizationWindow);
 
   WavefrontSensor wSensor;
-  std::vector<cv::Mat> d = {(d0-imageD0Offset).mul(apodizationWindow), (dk-imageDkOffset).mul(apodizationWindow)};
-  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()};
+  //std::vector<cv::Mat> d = {(d0-imageD0Offset).mul(apodizationWindow), (dk-imageDkOffset).mul(apodizationWindow)};
+  std::vector<cv::Mat> d = {d0, dk};
+  double sigma_d0 = ( cv::mean(d0).val[0] / 100.0 ) * 0.38;
+  double sigma_dk = ( cv::mean(dk).val[0] / 100.0 ) * 0.33;
+  std::cout << "sigma_d0: " << sigma_d0 << "; " << "sigma_dk: " << sigma_dk << std::endl;
+  // {0.3, 0.4};
+  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{sigma_d0*sigma_d0/d0.total(), sigma_dk*sigma_dk/dk.total()};
+
   cv::Mat phaseResult = wSensor.WavefrontSensing(d, meanPowerNoise);
 }
 

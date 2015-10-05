@@ -4,10 +4,9 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 CPP_SRCS += \
-../AWMLE.cpp \
 ../EffectivePixel.cpp \
 ../FITS.cpp \
-../Fusion.cpp \
+../CompressedSensing.cpp \
 ../Curvelets.cpp \
 ../ImageQualityMetric.cpp \
 ../Minimization.cpp \
@@ -21,14 +20,12 @@ CPP_SRCS += \
 ../TelescopeSettings.cpp \
 ../TestRoom.cpp \
 ../WavefrontSensor.cpp \
-../WaveletTransform.cpp \
 ../Zernikes.cpp 
 
 OBJS += \
-./src/AWMLE.o \
 ./src/EffectivePixel.o \
 ./src/FITS.o \
-./src/Fusion.o \
+./src/CompressedSensing.o \
 ./src/Curvelets.o \
 ./src/ImageQualityMetric.o \
 ./src/Minimization.o \
@@ -42,14 +39,12 @@ OBJS += \
 ./src/TelescopeSettings.o \
 ./src/TestRoom.o \
 ./src/WavefrontSensor.o \
-./src/WaveletTransform.o \
 ./src/Zernikes.o 
 
 CPP_DEPS += \
-./src/AWMLE.d \
 ./src/EffectivePixel.d \
 ./src/FITS.d \
-./src/Fusion.d \
+./src/CompressedSensing.d \
 ./src/Curvelets.d \
 ./src/ImageQualityMetric.d \
 ./src/Minimization.d \
@@ -63,7 +58,6 @@ CPP_DEPS += \
 ./src/TelescopeSettings.d \
 ./src/TestRoom.d \
 ./src/WavefrontSensor.d \
-./src/WaveletTransform.d \
 ./src/Zernikes.d 
 
 

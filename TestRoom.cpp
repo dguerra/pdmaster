@@ -13,12 +13,11 @@
 #include "TestRoom.h"
 #include "PDTools.h"
 #include "Zernikes.h"
-#include "Zernikes.cpp"
 #include "NoiseEstimator.h"
 #include "OpticalSystem.h"
-#include "WaveletTransform.h"
 #include "FITS.h"
 //#include "AWMLE.h"
+#include "TelescopeSettings.h"
 #include "ImageQualityMetric.h"
 #include "Minimization.h"
 #include "curvelab/fdct_wrapping.hpp"
@@ -75,26 +74,6 @@ bool test_curveletDemoDenoise()
   
   Curvelets::fdct(X, C, false);
 
-  
-  /*
-  std::vector<std::vector<double> > E;
-  for(unsigned int s=0;s<C.size();++s)
-  {
-    std::vector<double> E_v;
-    for(unsigned int w=0;w<C.at(s).size();++w)
-    {
-      cv::Mat A;
-      C.at(s).at(w).copyTo(A);
-      bool conjB = true;
-      cv::Mat absA2;
-      cv::mulSpectrums(A, A, absA2, cv::DFT_COMPLEX_OUTPUT, conjB);
-      E_v.push_back( std::sqrt(cv::sum(absA2).val[0] ));
-      //E_v.push_back(0.0);
-    }
-    E.push_back(E_v);
-  }
-  */
-  
   int nb(0);
   for(unsigned int s=0;s<C.size();++s)
   {
@@ -133,50 +112,78 @@ bool test_curveletDemoDenoise()
   writeFITS(absComplex(restored_img), "../res_out.fits");
 
   return true;
+}
 
-/*
-//Starts matlab code from demo
-img = double(imread('Lena.jpg'));
-n = size(img,1);
-sigma = 20;        
-is_real = 1;
-
-noisy_img = img + sigma*randn(n);
-
-disp('Compute all thresholds');
-F = ones(n);
-X = fftshift(ifft2(F)) * sqrt(prod(size(F)));   % second term accounts for unitary fft
-tic, C = fdct_wrapping(X,0); toc;
-
-% Compute norm of curvelets (exact)
-E = cell(size(C));
-for s=1:length(C)
-  E{s} = cell(size(C{s}));
-  for w=1:length(C{s})
-    A = C{s}{w};
-    E{s}{w} = sqrt(sum(sum(A.*conj(A))) / prod(size(A)));
-  end
-end
-
-% Take curvelet transform
-disp(' ');
-disp('Take curvelet transform: fdct_wrapping');
-tic; C = fdct_wrapping(noisy_img,1); toc;
-
-% Apply thresholding
-Ct = C;
-for s = 2:length(C)
-  thresh = 3*sigma + sigma*(s == length(C));
-  for w = 1:length(C{s})
-    Ct{s}{w} = C{s}{w}.* (abs(C{s}{w}) > thresh*E{s}{w});
-  end
-end
-
-% Take inverse curvelet transform 
-disp(' ');
-disp('Take inverse transform of thresholded data: ifdct_wrapping');
-tic; restored_img = real(ifdct_wrapping(Ct,1)); toc;
-*/
+bool test_LinearizedBregmanAlgorithmDenoising()
+{
+  cv::Mat dat, img;
+  readFITS("../inputs/Lena.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+  cv::flip(img, img, -1);
+  cv::Mat gauss_noise(img.size(), cv::DataType<double>::type);
+  double sigma_ = 20;
+  cv::Scalar sigma(sigma_), m_(0);
+  
+  cv::theRNG() = cv::RNG( time (0) );
+  cv::randn(gauss_noise, m_, sigma);
+  cv::Mat noisy_img;
+  cv::add(img, gauss_noise, noisy_img);
+  std::vector<std::vector<cv::Mat> > C;   //Curvelets coeffs
+  Curvelets::fdct(noisy_img, C, true);
+  
+  auto shrink = [] (const std::vector<std::vector<cv::Mat> >& v, const double& mu)
+  {
+    for(unsigned int s=0; s<v.size(); ++s)
+    {
+      for(unsigned int w=0; w<v.at(s).size(); ++w)
+      {
+        cv::Mat u = cv::Mat::zeros(v.at(s).at(w).size(), v.at(s).at(w).type());
+        cv::Mat vPlusmu, vMinusmu;
+        cv::add(v.at(s).at(w), mu, vPlusmu);
+        cv::subtract(v.at(s).at(w), mu, vMinusmu);
+        vMinusmu.copyTo(u, v.at(s).at(w)>mu);
+        vPlusmu.copyTo(u, v.at(s).at(w)<-mu);
+        u.copyTo(v.at(s).at(w));
+      }
+    }
+  };
+  
+  std::vector<std::vector<cv::Mat> > v, u;
+  Curvelets::fdct(cv::Mat::zeros(noisy_img.size(), noisy_img.type()), v, true);
+  Curvelets::fdct(cv::Mat::zeros(noisy_img.size(), noisy_img.type()), u, true);
+  double epsilon(0.00001);
+  double conver(999999);
+  double mu(0.5), delta(0.1);
+  while(conver > epsilon)
+  {
+    cv::Mat Au;
+    std::vector<std::vector<cv::Mat> > At;
+    Curvelets::ifdct(u, Au, noisy_img.rows, noisy_img.cols, true);
+    cv::Mat d = noisy_img - Au;
+    Curvelets::fdct(d, At, true);
+    conver = cv::sum(cv::abs(d)).val[0];
+    for(unsigned int s=0; s<v.size(); ++s)
+    {
+      for(unsigned int w=0; w<v.at(s).size(); ++w)
+      {
+        v.at(s).at(w)= v.at(s).at(w) + At.at(s).at(w);
+      }
+    }
+  
+    shrink(v, mu);
+    for(unsigned int s=0; s<v.size(); ++s)
+    {
+      for(unsigned int w=0; w<v.at(s).size(); ++w)
+      {
+        u.at(s).at(w) = v.at(s).at(w).mul(delta);
+      }
+    }
+  }
+  
+  cv::Mat out;
+  Curvelets::ifdct(u, out, noisy_img.rows, noisy_img.cols, true);
+  writeFITS(splitComplex(out).first, "../out.fits");
+  return true;
 }
 
 bool test_simpleCurveletsRegularization()
@@ -636,9 +643,9 @@ void test_generizedPupilFunctionVsOTF()
   double diversityFactor_ = -2.21209;
   constexpr double PI = 2*acos(0.0);
   double c4 = diversityFactor_ * PI/(2.0*std::sqrt(3.0));
-  cv::Mat z4 = Zernikes<double>::phaseMapZernike(4, 128, 50);
-  double z4AtOrigen = Zernikes<double>::pointZernike(4, 0, 0);
-  cv::Mat pupilAmplitude = Zernikes<double>::phaseMapZernike(1, 128, 50);
+  cv::Mat z4 = Zernikes::phaseMapZernike(4, 128, 50);
+  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
+  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, 128, 50);
   cv::Mat c = cv::Mat::zeros(14, 1, cv::DataType<double>::type);
   c.at<double>(0,3) = 0.8;
   c.at<double>(0,4) = 0.3;
@@ -651,8 +658,8 @@ void test_generizedPupilFunctionVsOTF()
   c1.at<double>(0,6) = 0.9;
   c1.at<double>(0,10) = 0.42;
 
-  cv::Mat focusedPupilPhase = Zernikes<double>::phaseMapZernikeSum(128, 50, c);
-  cv::Mat focusedPupilPhase1 = Zernikes<double>::phaseMapZernikeSum(128, 50, c1);
+  cv::Mat focusedPupilPhase = Zernikes::phaseMapZernikeSum(128, 50, c);
+  cv::Mat focusedPupilPhase1 = Zernikes::phaseMapZernikeSum(128, 50, c1);
 
   cv::Mat defocusedPupilPhase = focusedPupilPhase + c4*(z4-z4AtOrigen);
   cv::Mat defocusedPupilPhase1 = focusedPupilPhase1 + c4*(z4-z4AtOrigen);
@@ -689,7 +696,7 @@ void test_wavelet_zernikes_decomposition()
 void test_zernike_wavelets_decomposition()
 {
   std::vector<cv::Mat> vCat;
-  std::map<unsigned int, cv::Mat> cat = Zernikes<double>::buildCatalog(20, 200, 200/2);
+  std::map<unsigned int, cv::Mat> cat = Zernikes::buildCatalog(20, 200, 200/2);
   std::vector<cv::Mat> wavelet_planes;
   cv::Mat residu;
   unsigned int count(0);
@@ -843,7 +850,7 @@ void test_divComplex()
 bool test_zernikes()
 {
 
-  cv::Mat mask = Zernikes<float>::phaseMapZernike(1,128*8,128*4);
+  cv::Mat mask = Zernikes::phaseMapZernike(1,128*8,128*4);
   cv::imshow("mask",mask);
   cv::waitKey();
   cv::imwrite("mask.ppm",mask);
@@ -858,12 +865,12 @@ void test_phaseMapZernikeSum()
   int n = sizeof(data) / sizeof(data[0]);
   cv::Mat coeffs(n, 1, CV_64FC1, data);
   std::cout << "coeffs: " << coeffs << std::endl;
-  cv::Mat phaseMapSum = Zernikes<double>::phaseMapZernikeSum(136/2, 32.5019, coeffs);
+  cv::Mat phaseMapSum = Zernikes::phaseMapZernikeSum(136/2, 32.5019, coeffs);
   std::cout << "phaseMapSum.at<double>(30,30): " << phaseMapSum.at<double>(40,40) << std::endl;
 
   for(unsigned int i=4;i<=10;++i)
   {
-    cv::Mat zern = Zernikes<double>::phaseMapZernike(i, 136/2, 32.5019);
+    cv::Mat zern = Zernikes::phaseMapZernike(i, 136/2, 32.5019);
     cv::normalize(zern, zern, 0, 1, CV_MINMAX);
     writeOnImage(zern, std::to_string(i));
     cv::imshow(std::to_string(i), zern);
@@ -941,7 +948,7 @@ void test_getNM()
   int M;
   for(unsigned int j=1; j<=10; ++j)
   {
-    Zernikes<float>::getNM(j,N,M);
+    Zernikes::getNM(j,N,M);
     std::cout << "Zernike Index: " << j << "; N: " << N << "; M: " << M << std::endl;
   }
 }

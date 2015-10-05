@@ -33,15 +33,12 @@ void OpticalSystem::compute_OTF_(const cv::Mat& phase, const cv::Mat& amplitude,
   if (phase.channels() == 1 && amplitude.channels() == 1 && phase.size() == amplitude.size() && phase.type() == amplitude.type())
   {
     compute_GeneralizedPupilFunction_(phase, amplitude, generalizedPupilFunction_);
-    //cv::Mat unnormalizedOTF = crosscorrelation(generalizedPupilFunction_, generalizedPupilFunction_);
     
     cv::Mat unnormalizedOTF;
-    bool full(true), corr(true);
+    bool full(false), corr(true);
     convolveDFT(generalizedPupilFunction_, generalizedPupilFunction_, unnormalizedOTF, corr, full);
-    cv::copyMakeBorder(unnormalizedOTF, unnormalizedOTF, 1, 0, 1, 0, cv::BORDER_CONSTANT);
     fftShift(unnormalizedOTF);
-    
-    
+
     //Normalize to be have 1 at oringen of the otf
     otfNormalizationFactor_ = unnormalizedOTF.col(0).row(0).clone();
     cv::Mat mfactor = cv::repeat(otfNormalizationFactor_, unnormalizedOTF.rows, unnormalizedOTF.cols);

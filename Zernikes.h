@@ -17,7 +17,6 @@
 #include <ctime>
 #include "opencv2/opencv.hpp"
 
-template<typename T>
 class Zernikes
 {
  public:
@@ -56,7 +55,7 @@ class Zernikes
    *               system). More traditional notation measures theta clockwise
    *               from y-axis.
    */
-  static T pointZernike(const unsigned int& j, const double& rho, const double& theta);
+  static double pointZernike(const unsigned int& j, const double& rho, const double& theta);
 
 
   /**
@@ -66,6 +65,9 @@ class Zernikes
    */
   static cv::Mat phaseMapZernikeSum(const unsigned int& sideLength, const double& radiousLength, const cv::Mat& coeffs);
 
+  static cv::Mat zernike_function(const double& lambda, const double& r_c, const int& nph, const int& j, const double& angle);
+  
+  static cv::Mat pupilAmplitude(const double& r_c, const int& nph);
   /**
    * Returns a phase map given by a single Zernike polynomial
    *

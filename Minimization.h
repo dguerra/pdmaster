@@ -37,21 +37,17 @@ public:
   
   double brent(std::function<double(double)> &func);
   
-  double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, bool &resolutionLimit);
+  double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func);
   
-  double armijoWolfeLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc, bool &resolutionLimit);
-
   //Both annalitical expressions are supplied: objective function and gradient
   void dfpmin(cv::Mat &p, int &iter, double &fret, 
               std::function<double(cv::Mat )> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
   
-//  int nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, 
-//               cv::Mat &hessin, double &fret, std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
+  int nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, cv::Mat &hessin, double &fret, 
+                           std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
  
   void minimize(cv::Mat &p, const cv::Mat &Q2,
                 const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc);
-  
-  int descentDirection(const cv::Mat& subdifferential, const cv::Mat& Bt, const std::function<cv::Mat(cv::Mat, cv::Mat)>& sup_gp, cv::Mat& p, cv::Mat& gnew);
   
 private:
   int iter_;   //total number of iterations to get to the mininum
