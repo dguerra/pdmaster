@@ -86,24 +86,18 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
 }
 
 void Metric::compute_dQ(const std::vector<cv::Mat>& D, const cv::Mat& zernikeElement, 
-                        const std::vector<OpticalSystem>& OS, cv::Mat& dQ)
+                        const std::vector<OpticalSystem>& OS, const unsigned int& j, cv::Mat& dQ)
 {
-   //We use 'depth' here instead of 'type' because we want 1-channel image
-  dQ = cv::Mat::zeros(D.front().size(), D.front().type());
-  for(size_t j = 0; j < D.size(); ++j)
-  { 
-    cv::Mat Sj = OS.at(j).otf().clone();
-    fftShift(Sj);
-    cv::Mat dSj, SjdSj, dSjSj;
-    compute_dSj(OS.at(j), zernikeElement, dSj);
+  //We use 'depth' here instead of 'type' because we want 1-channel image
+  cv::Mat Sj = OS.at(j).otf().clone();
+  fftShift(Sj);
+  cv::Mat dSj, SjdSj, dSjSj;
+  compute_dSj(OS.at(j), zernikeElement, dSj);
     
-    bool conjB(true);
-    cv::mulSpectrums(Sj, dSj, SjdSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj x dSj*
-    cv::mulSpectrums(dSj, Sj, dSjSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj* x dSj
-    //in case of undersampling optimumSideLength is bigger then image size
-    cv::Mat sumSjdSj = SjdSj + dSjSj;
-    cv::accumulate(sumSjdSj, dQ); //equivalent to Q += (absSj)^2 === absSj.mul(absSj);
-  }
+  bool conjB(true);
+  cv::mulSpectrums(Sj, dSj, SjdSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj x dSj*
+  cv::mulSpectrums(dSj, Sj, dSjSj, cv::DFT_COMPLEX_OUTPUT, conjB);  //Sj* x dSj
+  dQ = SjdSj + dSjSj;
 }
 
 
@@ -128,20 +122,13 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<cv::Mat>& D, cons
 }
 
 void Metric::compute_dP(const std::vector<cv::Mat>& D, const cv::Mat& zernikeElement, 
-                        const std::vector<OpticalSystem>& OS, cv::Mat& dP)
+                        const std::vector<OpticalSystem>& OS, const unsigned int& j, cv::Mat& dP)
 {
-  dP = cv::Mat::zeros(D.front().size(), D.front().type());
-
-  //dP = accumulate over J { Dj * derivative(conj(Sj)) } 
-  for(size_t j = 0; j < D.size(); ++j)
-  {
-    cv::Mat dSj, dSjDj;
-    compute_dSj(OS.at(j), zernikeElement, dSj);
-    bool conjB(true);
-    
-    cv::mulSpectrums(D.at(j), dSj, dSjDj, cv::DFT_COMPLEX_OUTPUT, conjB);
-    cv::accumulate(dSjDj, dP);   //equivalent to dP += dSjDj;
-  }
+  //Simply compute one element of the sum in dP
+  cv::Mat dSj;
+  compute_dSj(OS.at(j), zernikeElement, dSj);
+  bool conjB(true);
+  cv::mulSpectrums(D.at(j), dSj, dP, cv::DFT_COMPLEX_OUTPUT, conjB);
 }
 
 
@@ -266,6 +253,7 @@ void Metric::phi( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
   }
 }
 
+//Compute the jacobian of Φ in the equation: y = Φ(x) + e
 void Metric::compute_dphi( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
                            const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, std::vector<std::vector<cv::Mat> >& jacob )
 {
@@ -285,46 +273,109 @@ void Metric::compute_dphi( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
   
   size_t J = OS.size();
   size_t M = zernikeBase.size();
-  bool conjB(true);
   
+  jacob.clear();
   for(unsigned int j = 0; j < J; ++j)
   {
     cv::Mat Sj = OS.at(j).otf().clone();
     fftShift(Sj);
     cv::Mat PSj;
     cv::mulSpectrums(P, Sj, PSj, cv::DFT_COMPLEX_OUTPUT);
+    
     std::vector<cv::Mat> vecM;
-    for(size_t m = 0; m < M; ++m)
+    for(unsigned int k = 0; k < J; ++k)
     {
-      cv::Mat accDdSk = cv::Mat::zeros(Sj.size(), Sj.type());
-      cv::Mat accSdSk = cv::Mat::zeros(Sj.size(), Sj.type());
-      for(unsigned int k = 0; k < J; ++k)
+      for(size_t m = 0; m < M; ++m)
       {
-        cv::Mat DdSk, SdSk, dSk;
-        compute_dSj(OS.at(k), zernikeBase.at(m), dSk);
-        cv::mulSpectrums(D.at(k), dSk, DdSk, cv::DFT_COMPLEX_OUTPUT, conjB);
-        cv::accumulate(DdSk, accDdSk);
-        
-        cv::Mat Sk = OS.at(k).otf().clone();
-        fftShift(Sk);
-        cv::mulSpectrums(Sk, dSk, SdSk, cv::DFT_COMPLEX_OUTPUT, conjB);
-        cv::accumulate(SdSk, accSdSk);
+        cv::Mat PdSj = cv::Mat::zeros(Sj.size(), Sj.type());
+        cv::Mat dPSj, dSj, dP, dQ, lterm, rterm, tt;
+        if(j == k)
+        {
+          compute_dSj(OS.at(j), zernikeBase.at(m), dSj);
+          cv::mulSpectrums(P, dSj, PdSj, cv::DFT_COMPLEX_OUTPUT);
+        }
+        compute_dP(D, zernikeBase.at(m), OS, k, dP);
+        cv::mulSpectrums(dP, Sj, dPSj, cv::DFT_COMPLEX_OUTPUT);
+        cv::mulSpectrums(Q, dPSj+PdSj, lterm, cv::DFT_COMPLEX_OUTPUT);
+        compute_dQ(D, zernikeBase.at(m), OS, k, dQ);
+        cv::mulSpectrums(dQ, PSj, rterm, cv::DFT_COMPLEX_OUTPUT);
+        divSpectrums(lterm-rterm, Q2, tt, cv::DFT_COMPLEX_OUTPUT);
+        vecM.push_back(tt);
       }
-      cv::Mat dSj, PdSj;
-      compute_dSj(OS.at(j), zernikeBase.at(m), dSj);
-      cv::mulSpectrums(P, dSj, PdSj, cv::DFT_COMPLEX_OUTPUT);
-
-      cv::Mat accDdSkSj, lterm, rterm;
-      cv::mulSpectrums(accDdSk, Sj, accDdSkSj, cv::DFT_COMPLEX_OUTPUT);
-      cv::mulSpectrums(Q, accDdSkSj + PdSj, lterm, cv::DFT_COMPLEX_OUTPUT);
-      cv::mulSpectrums(PSj, accSdSk + conjComplex(accSdSk), rterm, cv::DFT_COMPLEX_OUTPUT);
-      cv::Mat tt;
-      divSpectrums(lterm-rterm, Q2, tt, cv::DFT_COMPLEX_OUTPUT);
-      vecM.push_back(tt);
     }
+   
     jacob.push_back(vecM);
   }
+}
 
+void Metric::compute_dphi( const cv::Mat& coeffs, const std::vector<cv::Mat>& D,
+                           const std::vector<cv::Mat>& zernikeBase, const std::vector<double>& meanPowerNoise, cv::Mat& jacob )
+{
+  //look into cv::resize function to convert matrix into a vector...
+  auto matrixToVector = [](const cv::Mat &matrix, cv::Mat& vector)
+  {
+    std::vector<cv::Mat> columnsVector;
+    for(unsigned int i = 0; i<matrix.cols; ++i)
+    {
+      columnsVector.push_back(matrix.col(i));
+    }
+    cv::vconcat(columnsVector, vector);
+  };
+  
+  cv::Mat P, Q, H, F;
+  std::vector<OpticalSystem> OS;
+  characterizeOpticalSystem(coeffs, D, zernikeBase, OS);
+  computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS, Q);
+  computeP(coeffs, D, zernikeBase, meanPowerNoise, OS, P);
+  noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, P, Q, H);
+
+  //Object estimate: F = (P/Q) x filter
+  divSpectrums(P, Q, F, cv::DFT_COMPLEX_OUTPUT);
+  cv::mulSpectrums(F, makeComplex(H), F, cv::DFT_COMPLEX_OUTPUT);
+  
+  cv::Mat Q2;
+  cv::mulSpectrums(Q, Q, Q2, cv::DFT_COMPLEX_OUTPUT);
+  
+  size_t J = OS.size();
+  size_t M = zernikeBase.size();
+  bool conjB(true);
+  
+  std::vector<cv::Mat> vecJ;
+  for(unsigned int j = 0; j < J; ++j)
+  {
+    cv::Mat Sj = OS.at(j).otf().clone();
+    fftShift(Sj);
+    cv::Mat PSj;
+    cv::mulSpectrums(P, Sj, PSj, cv::DFT_COMPLEX_OUTPUT);
+    
+    std::vector<cv::Mat> vecM;
+    for(unsigned int k = 0; k < J; ++k)
+    {
+      for(size_t m = 0; m < M; ++m)
+      {
+        cv::Mat PdSj = cv::Mat::zeros(Sj.size(), Sj.type());
+        cv::Mat dPSj, dSj, dP, dQ, lterm, rterm, tt;
+        if(j == k)
+        {
+          compute_dSj(OS.at(j), zernikeBase.at(m), dSj);
+          cv::mulSpectrums(P, dSj, PdSj, cv::DFT_COMPLEX_OUTPUT);
+        }
+        compute_dP(D, zernikeBase.at(m), OS, k, dP);
+        cv::mulSpectrums(dP, Sj, dPSj, cv::DFT_COMPLEX_OUTPUT);
+        cv::mulSpectrums(Q, dPSj+PdSj, lterm, cv::DFT_COMPLEX_OUTPUT);
+        compute_dQ(D, zernikeBase.at(m), OS, k, dQ);
+        cv::mulSpectrums(dQ, PSj, rterm, cv::DFT_COMPLEX_OUTPUT);
+        divSpectrums(lterm-rterm, Q2, tt, cv::DFT_COMPLEX_OUTPUT);
+        cv::Mat tt_v;
+        matrixToVector(tt, tt_v);
+        vecM.push_back(tt_v);
+      }
+    }
+    cv::Mat vecM_v;
+    cv::hconcat(vecM, vecM_v);
+    vecJ.push_back(vecM_v);
+  }
+  cv:vconcat(vecJ,jacob);
 }
 
 //Computes derivative of OTF with respect to an element of the zernike base
@@ -364,7 +415,6 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
   computeP(coeffs, D, zernikeBase, meanPowerNoise, OS, P);
   computeQ(coeffs, D, zernikeBase, meanPowerNoise, OS, Q);
   //Some useful calculations
-  cv::Mat absP2, Q2;
   bool conjB(true);
   noiseFilter(coeffs, D, zernikeBase, meanPowerNoise, P, Q, H);
   //Object estimate: F = (P/Q) x filter
@@ -398,34 +448,31 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<cv::Mat>& D, 
       cv::Mat dSj, dSjV;
       compute_dSj(OS.at(j), zernikeBase.at(m), dSj);
       cv::mulSpectrums(dSj, V, dSjV, cv::DFT_COMPLEX_OUTPUT);
-      double gi = cv::sum(dSjV).val[0];  //Is it possible to do it with cv::dot??
-      if(!zernikeBase.at(m).empty()) {g.at<double>((j * M) + m, 0) = gi;}
+      if(!zernikeBase.at(m).empty()) {g.at<double>((j * M) + m, 0) =  cv::sum(dSjV).val[0];}  //Is it possible to do it with cv::dot??
       else {g.at<double>((j * M) + m, 0) = 0.0;}
     }
   }
   
-  //Alternate way of getting the gradient through jacobian of phi
-  cv::Mat g_phi = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
-  std::vector<std::vector<cv::Mat> > jacob;
+  
+  //Alternate way of getting the gradient through dP and dQ
   std::vector<cv::Mat> De;
-  compute_dphi(coeffs, D, zernikeBase, meanPowerNoise, jacob);
+  std::vector<std::vector<cv::Mat> > jacob;
   phi(coeffs, D, zernikeBase, meanPowerNoise, De);
+  compute_dphi(coeffs, D, zernikeBase, meanPowerNoise, jacob);
+  cv::Mat g_phi = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
+  
   for(size_t j = 0; j < J; ++j)
   { 
-    for(size_t m = 0; m < M; ++m)
-    {
-      cv::Mat lterm, rterm, diff;
-      cv::mulSpectrums(jacob.at(j).at(m), De.at(j), lterm, cv::DFT_COMPLEX_OUTPUT, conjB);
-      cv::mulSpectrums(D.at(j), De.at(j), rterm, cv::DFT_COMPLEX_OUTPUT, conjB);
-      diff = lterm - rterm;
-      g_phi.at<double>((j * M) + m, 0) = cv::sum(diff).val[0];
+    cv::Mat diff = D.at(j)-De.at(j);
+    for(size_t m = 0; m < J*M; ++m)
+    { 
+      cv::Mat tt;
+      //cv::mulSpectrums(diff, jacob.at(k).at(m), tt, cv::DFT_COMPLEX_OUTPUT, conjB);
+      cv::mulSpectrums(diff, jacob.at(j).at(m), tt, cv::DFT_COMPLEX_OUTPUT, conjB);
+      g_phi.at<double>(m, 0) += cv::sum(tt).val[0];
     }
   }
-  std::cout << "g: " << g.t() << std::endl;
-  std::cout << "g_phi: " << g_phi.t() << std::endl;
-  cv::Mat gg = g/g_phi;
-  std::cout << "g/g_phi: " << gg.t() << std::endl;
-  
+
   g = g / zernikeBase.front().total();
 
   return g;

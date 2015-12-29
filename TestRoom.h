@@ -11,6 +11,9 @@
 
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize);
+void test_fista();
+//void test_nonlinearCompressedSensing();
+bool test_BSL();
 bool test_curveLab();
 bool test_singleCurvelet();
 bool test_curveletDemoDenoise();

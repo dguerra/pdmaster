@@ -28,7 +28,7 @@ class Minimization
 public:
   Minimization();
   virtual ~Minimization();
-  
+  enum class Method {BFGS, FISTA};
   cv::Mat gradient_diff(cv::Mat x, const std::function<double(cv::Mat)>& func);
   
   double fret() const {return fret_;};
@@ -40,14 +40,19 @@ public:
   double brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<double(cv::Mat)> &func);
   
   //Both annalitical expressions are supplied: objective function and gradient
-  void dfpmin(cv::Mat &p, int &iter, double &fret, 
+  void perform_BFGS(cv::Mat &p, int &iter, double &fret, 
               std::function<double(cv::Mat )> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
   
   int nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, cv::Mat &hessin, double &fret, 
                            std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc);
  
+  void perform_FISTA(cv::Mat& x, const std::function<double(cv::Mat)>& f, const std::function<double(cv::Mat)>& g, 
+                               const std::function<cv::Mat(cv::Mat, double)>& ProxF, const std::function<cv::Mat(cv::Mat)>& GradG, double L);
+                               
+  void perform_IHT( const cv::Mat& observation, const cv::Mat& measurement, cv::Mat&  x0, const unsigned int& sparsity, const double& mu);
+                               
   void minimize(cv::Mat &p, const cv::Mat &Q2,
-                const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc);
+                const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc, const Method& method = Method::BFGS);
   
 private:
   int iter_;   //total number of iterations to get to the mininum

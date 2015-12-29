@@ -76,7 +76,7 @@ void OpticalSystem::compute_GeneralizedPupilFunction_(const cv::Mat& phase, cons
   }
 }
 
-cv::Mat OpticalSystem::generalizedPupilFunction()const
+cv::Mat OpticalSystem::generalizedPupilFunction() const
 {
   //cv::Mat mfactor = cv::repeat(otfNormalizationFactor_, generalizedPupilFunction_.rows, generalizedPupilFunction_.cols);
   //cv::Mat normGeneralizedPupilFunction;

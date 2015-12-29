@@ -20,7 +20,6 @@ public:
   WavefrontSensor();
   virtual ~WavefrontSensor();
   cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise);
-  void ista(cv::Mat& u,  const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& grad);
   
 private:
   std::vector<double> diversityFactor_;

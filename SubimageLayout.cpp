@@ -32,7 +32,7 @@ SubimageLayout::~SubimageLayout()
 void SubimageLayout::computerGeneratedImage()
 {
   //Benchmark
-  int isize = 80; //128;
+  int isize = 42; //32; //128;
   cv::Mat img;
   if(true)
   {
@@ -40,90 +40,22 @@ void SubimageLayout::computerGeneratedImage()
     readFITS("../inputs/surfi000.fits", dat);
     dat.convertTo(img, cv::DataType<double>::type);
 
-    int X(100),Y(100);
-    cv::Rect rect1(X, Y, isize, isize);
+    int X(100),Y(100);  //Select a point in the image to find the aberration at
+    cv::Rect rect1(X-(isize/2), Y-(isize/2), isize, isize);   //Draw a rectangle centered at that point
     
     img = img(rect1).clone();
     cv::normalize(img, img, 0, 1, CV_MINMAX);
     std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
   }
-
-  cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
-  cv::Mat complexI;
-  cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
-
-  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(complexI);
-
-  TelescopeSettings ts(isize);
   
-  double pupilRadious = ts.pupilRadiousPixels(); // 32.5011;
-  std::cout << "pupilRadious: " << pupilRadious << std::endl;
-  double pupilSideLength = isize;
-
-  int K = 2;
-  int M = 14;
-  
-  double data[] = {  0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9,
-                     0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9};
-  
-//  double data[] = {  0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-//                     0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-  
-  cv::Mat coeffs(K*M, 1, cv::DataType<double>::type, data);
-  
-  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, pupilRadious);
-  
-  ////////Consider the case of two diversity images
-  std::vector<double> diversityFactor = {0.0, ts.k()};
-  cv::Mat z4 = Zernikes::phaseMapZernike(4, pupilSideLength, pupilRadious);
-  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
-  std::vector<cv::Mat> diversityPhase;
-  for(double dfactor : diversityFactor)
-  {
-    //defocus zernike coefficient: c4 = dfactor * PI/(2.0*std::sqrt(3.0))
-	  diversityPhase.push_back( (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen));
-    //diversityPhase.push_back(dfactor * z4);
-  }
-  ////////
-  
-  std::vector<OpticalSystem> OS;
-  for(int k=0; k<K; ++k)
-  {  //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
-    cv::Mat pupilPhase_i = Zernikes::phaseMapZernikeSum(pupilSideLength,pupilRadious, coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
-    OS.push_back(OpticalSystem(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
-  }
-   
+  int M = 14*2;
+  TelescopeSettings ts(img.cols);
+  //double data[] = { 0.0, 0.0, 0.0, 0.3, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+  double data[] = {   0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+  cv::Mat coeffs(M, 1, cv::DataType<double>::type, data);
   cv::Mat d1, d2;
-  cv::Mat otf1 = OS.front().otf();
-  cv::Mat otf2 = OS.back().otf();
-  fftShift(otf1);
-  fftShift(otf2);
-  
-  cv::mulSpectrums(selectCentralROI(otf1, complexI.size()), complexI.mul(complexI.total()), d1, cv::DFT_COMPLEX_OUTPUT);
-  //writeFITS(absComplex(d1), "../d1_before.fits");
-  cv::mulSpectrums(selectCentralROI(otf2, complexI.size()), complexI.mul(complexI.total()), d2, cv::DFT_COMPLEX_OUTPUT);
-  d1.setTo(0.0, Zernikes::phaseMapZernike(1, d1.cols, ts.cutoffPixel()) == 0);   //take out frequencies above cutoff
-  //writeFITS(absComplex(d1), "../d1_aftercut.fits");
-  d2.setTo(0.0, Zernikes::phaseMapZernike(1, d2.cols, ts.cutoffPixel()) == 0);   //take out frequencies above cutoff
-  
-  fftShift(d1);
-  fftShift(d2);
-  cv::idft(d1, d1, cv::DFT_REAL_OUTPUT);
-  cv::idft(d2, d2, cv::DFT_REAL_OUTPUT);
-  
-  cv::Mat noise1(isize, isize, cv::DataType<double>::type);
-  cv::Mat noise2(isize, isize, cv::DataType<double>::type);
-  cv::Scalar sigma(0.26), m_(0);
-  
-  cv::theRNG() = cv::RNG( time (0) );
-  cv::randn(noise1, m_, sigma);
-  
-  cv::theRNG() = cv::RNG( time (0) );
-  cv::randn(noise2, m_, sigma);
-
-  cv::add(d1, noise1, d1);
-  cv::add(d2, noise2, d2);
+  aberrate(img, coeffs, ts.pupilRadiousPixels(), 0.0,    0.06, d1);
+  aberrate(img, coeffs, ts.pupilRadiousPixels(), ts.k(), 0.06, d2);
 
   ImageQualityMetric iqm;
   cv::Mat d1_n;
@@ -154,6 +86,45 @@ void SubimageLayout::computerGeneratedImage()
   std::cout << "MSSIM obj: " << mssimIndex.val[0] << std::endl;
 
 }
+
+void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs, const double& pupilRadious, const double& diversity, const double& sigmaNoise, cv::Mat& aberratedImage)
+{
+
+  cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
+  cv::Mat complexI;
+  cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
+
+  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(complexI);
+
+  double pupilSideLength = img.cols;
+
+  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, pupilRadious);
+  
+  cv::Mat z4 = Zernikes::phaseMapZernike(4, pupilSideLength, pupilRadious);
+  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
+  cv::Mat diversityPhase = (diversity * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen);
+
+  cv::Mat pupilPhase = Zernikes::phaseMapZernikeSum(pupilSideLength, pupilRadious, aberationCoeffs);
+  OpticalSystem OS = OpticalSystem(pupilPhase + diversityPhase, pupilAmplitude);  //Characterized optical system
+
+  cv::Mat otf = OS.otf();
+  fftShift(otf);
+
+  cv::mulSpectrums(selectCentralROI(otf, complexI.size()), complexI.mul(complexI.total()), aberratedImage, cv::DFT_COMPLEX_OUTPUT);
+  
+  fftShift(aberratedImage);
+  cv::idft(aberratedImage, aberratedImage, cv::DFT_REAL_OUTPUT);
+
+  cv::Mat noise(img.size(), cv::DataType<double>::type);
+  cv::Scalar sigma(sigmaNoise), m_(0);
+  
+  cv::theRNG() = cv::RNG( time (0) );
+  cv::randn(noise, m_, sigma);
+  
+  cv::add(aberratedImage, noise, aberratedImage);
+}
+
 
 void SubimageLayout::navigateThrough()
 {

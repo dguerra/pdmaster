@@ -18,6 +18,7 @@ public:
   SubimageLayout();
   virtual ~SubimageLayout();
   void navigateThrough();
+  void aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs, const double& pupilRadious, const double& diversity, const double& sigmaNoise, cv::Mat& aberratedImage);
   void createModifiedHanningWindow(cv::Mat& modifiedHanningWindow, const int& sideLength, const double& apodizedAreaPercent, int datatype);
   void computerGeneratedImage();
 //  bool subimageQueueIsEmpty(){return subimageQueue_.empty();};

@@ -9,6 +9,8 @@
 #include "CustomException.h"
 #include "FITS.h"
 
+#include <limits>
+
 void dctMatrix(const unsigned int& m, const unsigned int& n, cv::Mat& mat)
 {
   if(m>n) throw CustomException("Number of columns must be larger than rows.");
@@ -53,7 +55,9 @@ void matchingPursuit()
   std::cout << "x0: " << x0 << std::endl;
 }
 
-void iterativeHardThresholding()
+
+
+void test_IHT()
 {
  
   auto randomMatrix = [](const unsigned int& xSize, const unsigned int& ySize) -> cv::Mat
@@ -112,7 +116,7 @@ void iterativeHardThresholding()
     return output;
   };
   
-  //Keep only k larges coefficients
+  //Keep only k largest  coefficients
   auto hardThreshold = [](cv::Mat& p, const unsigned int& k)
   {
     cv::Mat mask = cv::Mat::ones(p.size(), CV_8U);
@@ -120,7 +124,9 @@ void iterativeHardThresholding()
     for(unsigned int i=0;i<k;++i)
     {
       cv::Point maxLoc;
-      cv::minMaxLoc(pp, nullptr,nullptr, nullptr, &maxLoc, mask);
+      double maxVal;
+      cv::minMaxLoc(pp, nullptr, &maxVal, nullptr, &maxLoc, mask);
+      std::cout << "maxVal: " << maxVal << std::endl;
       mask.at<char>(maxLoc.y, maxLoc.x) = 0;
     }
     p.setTo(0.0, mask);
@@ -141,7 +147,7 @@ void iterativeHardThresholding()
   cv::idct(eye_nn, phi, cv::DCT_ROWS);
   phi = phi.t();
 //  cv::Mat psi;  //sensing matrix. dimension reduction
-  unsigned int a = 20;  //number of incoheren measurements
+  unsigned int a = 60;  //number of incoheren measurements
   cv::Mat shuffle_eye = shuffleRows(eye_nn);
   cv::Mat A = shuffle_eye(cv::Range(0, a), cv::Range::all());
   
@@ -172,13 +178,59 @@ void iterativeHardThresholding()
  
   std::cout << "y: " << y << std::endl;
   
+  //y -> observation
+  //x -> signal
+  //phi -> measurement
   cv::Mat x0 = cv::Mat::zeros(isize, 1, cv::DataType<double>::type);
   double mu(1.0);
-  for(unsigned int j =0; j<50; ++j)
+  
+  
+  /*
+  std::vector<cv::Mat> vA, vB;
+  cv::Mat A_, B_;
+  vA.push_back(randomMatrix(2,2));
+  vA.push_back(randomMatrix(2,2));
+  vB.push_back(randomMatrix(2,1));
+  vB.push_back(randomMatrix(2,1));
+  
+  cv::merge(vA, A_);
+  cv::merge(vB, B_);
+  std::cout << "A_: " << A_ << std::endl;
+  std::cout << "B_: " << B_ << std::endl;
+  
+  cv::Mat C_ = cv::Mat::ones(2,1,cv::DataType<std::complex<double> >::type);
+  cv::gemm(A_, B_, 1.0, C_, 1.0, C_, cv::GEMM_1_T);
+  std::cout << "C_: " << C_ << std::endl;
+  */
+  //iterativeHardThresholding(observation, measurement, measurement_t, signal, sparsity, mu, numberOfIterations)
+  iterativeHardThresholding(y, phi, x0, 3, mu, 50);
+}
+
+
+void iterativeHardThresholding( const cv::Mat& observation, const cv::Mat& measurement, cv::Mat&  x0, const unsigned int& sparsity, 
+                                const double& mu, const unsigned int& numberOfIterations)
+{
+   //Keep only k largest  coefficients
+  auto hardThreshold = [](cv::Mat& p, const unsigned int& k)
   {
-    x0 = x0 + ( mu * phi.t() * (  y - (phi * x0) ) );
-    hardThreshold(x0, 3);
+    cv::Mat mask = cv::Mat::ones(p.size(), CV_8U);
+    cv::Mat pp(cv::abs(p));
+    for(unsigned int i=0;i<k;++i)
+    {
+      cv::Point maxLoc;
+      cv::minMaxLoc(pp, nullptr,nullptr, nullptr, &maxLoc, mask);
+      mask.at<char>(maxLoc.y, maxLoc.x) = 0;
+    }
+    p.setTo(0.0, mask);
+  };
+  
+  for(unsigned int j =0; j<numberOfIterations; ++j)
+  {
+    //x0 = x0 + measurement.t() * (mu * (observation - (measurement*x0) ));
+    
+    cv::gemm(measurement, mu * (observation - (measurement*x0)), 1.0, x0, 1.0, x0, cv::GEMM_1_T);
+    hardThreshold(x0, sparsity);
     std::cout << "x0: " << x0.t() << std::endl;
   }
- 
 }
+

@@ -7,6 +7,7 @@ CPP_SRCS += \
 ../EffectivePixel.cpp \
 ../FITS.cpp \
 ../CompressedSensing.cpp \
+../SBL.cpp \
 ../Curvelets.cpp \
 ../ImageQualityMetric.cpp \
 ../Minimization.cpp \
@@ -26,6 +27,7 @@ OBJS += \
 ./src/EffectivePixel.o \
 ./src/FITS.o \
 ./src/CompressedSensing.o \
+./src/SBL.o \
 ./src/Curvelets.o \
 ./src/ImageQualityMetric.o \
 ./src/Minimization.o \
@@ -45,6 +47,7 @@ CPP_DEPS += \
 ./src/EffectivePixel.d \
 ./src/FITS.d \
 ./src/CompressedSensing.d \
+./src/SBL.d \
 ./src/Curvelets.d \
 ./src/ImageQualityMetric.d \
 ./src/Minimization.d \

@@ -43,9 +43,9 @@ cv::Mat Minimization::gradient_diff(cv::Mat x, const std::function<double(cv::Ma
   return df;
 };
 
-//const std::function<cv::Mat(cv::Mat, cv::Mat)>& sup_gp   -> nonsmooth case
+
 void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
-                            const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc)
+                            const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& dfunc, const Method& method)
 { 
   //Lambda function that turn minimize function + constraints problem into minimize function lower dimension problem
   auto F_constrained = [] (cv::Mat x, std::function<double(cv::Mat)> func, const cv::Mat& Q2) -> double
@@ -62,11 +62,135 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
   std::function<cv::Mat(cv::Mat)> df_constrained = std::bind(DF_constrained, std::placeholders::_1, dfunc, Q2);
   //Define a new starting point with lower dimensions after reduction with contraints
   cv::Mat p_constrained = Q2.t() * p;
-  dfpmin(p_constrained, iter_, fret_, f_constrained, df_constrained);
+  
+  
+  if(method == Method::BFGS)   //perform_BFGS
+  {
+    perform_BFGS(p_constrained, iter_, fret_, f_constrained, df_constrained);
+  }
+  else  if(method == Method::FISTA)   //perform_FISTA
+  {
+        //double lambda = 1.5;
+    double lambda = 1.0;
+    auto perform_soft_thresholding = [lambda](cv::Mat x, double tau)-> cv::Mat
+    {
+      //   Proximal operator for the scalar L1 norm.
+      //   y = prox_{tau*|.|_1}(x) = max(0,1-tau/|x|)*x
+      //y = max(0,1-tau./max(abs(x),1e-10)).*x;
+      return cv::max(0.0, 1.0 - (lambda*tau)/cv::abs(x)).mul(x);
+    };
+    
+    double L = 1000.0;
+    //double L = 1.0;     //default
+    auto L1_norm = [lambda](cv::Mat x) -> double
+    {
+      return lambda * norm(x, cv::NORM_L1);
+    };
+    
+    //perform_fista(p, L1_norm, func, perform_soft_thresholding, dfunc, L);
+    perform_FISTA(p_constrained, L1_norm, f_constrained, perform_soft_thresholding, df_constrained, L); 
+  }
+  
   p = Q2 * p_constrained;   //Go back to original dimensional 
 }
 
-void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret, 
+
+void Minimization::perform_IHT( const cv::Mat& observation, const cv::Mat& measurement, cv::Mat&  x0, const unsigned int& sparsity, 
+                                const double& mu)
+{
+   //Keep only k largest  coefficients
+  auto hardThreshold = [](cv::Mat& p, const unsigned int& k)
+  {
+    cv::Mat mask = cv::Mat::ones(p.size(), CV_8U);
+    cv::Mat pp(cv::abs(p));
+    for(unsigned int i=0;i<k;++i)
+    {
+      cv::Point maxLoc;
+      cv::minMaxLoc(pp, nullptr, nullptr, nullptr, &maxLoc, mask);
+      mask.at<char>(maxLoc.y, maxLoc.x) = 0;
+    }
+    p.setTo(0.0, mask);
+  };
+  unsigned int numberOfIterations(200);
+  for(unsigned int j =0; j<numberOfIterations; ++j)
+  {
+    //x0 = x0 + measurement.t() * (mu * (observation - (measurement*x0) ));
+    
+    cv::gemm(measurement, mu * (observation - (measurement*x0)), 1.0, x0, 1.0, x0, cv::GEMM_1_T);
+    hardThreshold(x0, sparsity);
+    std::cout << "x0: " << x0.t() << std::endl;
+  }
+}
+
+
+
+//Perform FISTA method
+void Minimization::perform_FISTA(cv::Mat& x, const std::function<double(cv::Mat)>& f, const std::function<double(cv::Mat)>& g, 
+                               const std::function<cv::Mat(cv::Mat, double)>& ProxF, const std::function<cv::Mat(cv::Mat)>& GradG, double L)
+{
+//   Solves min_x g(x) + f(x)
+//   e.g.   g(x) = |Ax-y|^2  &&  f(x) = L1(x)
+//   where g is a smooth convex proper function and f is a
+//   convex proper function with an easy to compute proximal operator.
+
+//   http://www.mathworks.com/matlabcentral/fileexchange/16204-toolbox-sparse-optmization/content/toolbox_optim/perform_fb.m
+//   http://www.mathworks.com/matlabcentral/fileexchange/16204-toolbox-sparse-optmization/content/toolbox_optim/tests/html/test_l1_lagrangian.html
+//   https://github.com/gpeyre/matlab-toolboxes/blob/master/toolbox_optim/toolbox/perform_soft_thresholding.m
+//   https://github.com/gpeyre/matlab-toolboxes/blob/master/toolbox_optim/perform_fb.m#L29
+//   https://github.com/torch/optim/blob/master/fista.lua
+
+
+  unsigned int maxline(20);
+  unsigned int maxiter(1000);
+  double Lstep(2.5);
+  
+  double t = 1.0;
+  cv::Mat y = x.clone();
+  cv::Mat x0 = x.clone();
+  double fval =  std::numeric_limits<double>::max();
+  double epsilon = 0.0000000001; //0.0000001; //std::numeric_limits<double>::epsilon();
+    
+  for (unsigned int i=0;i<maxiter;++i)
+  {
+    cv::Mat xnew;
+    double gxnew;
+    std::cout << "L: " << L << " ";
+    
+    for(unsigned int nline=0;nline<maxline;++nline)
+    {
+      cv::Mat GradGy = GradG(y).clone();
+      xnew = ProxF( y - (1.0/L)*GradGy, (1.0/L) );
+      cv::Mat stp = xnew-y;
+      gxnew = g(xnew);
+      if (gxnew <= g(y) + stp.dot(GradGy) + (L/2.0) * stp.dot(stp) + f(xnew) )  break;
+      else L = L * Lstep;
+      std::cout << L << " " << std::endl;
+    }
+    
+    double fvalnew = gxnew + f(xnew);
+    if( (fvalnew - fval) < epsilon && (fvalnew - fval) > -epsilon) 
+    {
+      std::cout << "at step " << i <<  ". minimum reached: " << fvalnew << std::endl;
+      std::cout << "x = " << x.t() << std::endl;  
+      break;
+    }
+    
+    fval = fvalnew;
+    //cv::Mat xnew = ProxF( y - (1.0/L)*GradG(y), (1.0/L) );    ///CAUTION
+    double tnew = (1.0 + std::sqrt(1.0 + 4.0 * t * t)) / 2.0;
+    y = xnew + (t - 1.0)/(tnew) * (xnew - x);
+    x = xnew.clone();
+    t = tnew;
+    
+    std::cout << "step " << i << " to minimum. " <<  "fret: " << fval << std::endl;
+    std::cout << "x = " << x.t() << std::endl;
+  }
+}
+
+
+
+//perform_BFGS
+void Minimization::perform_BFGS(cv::Mat &p, int &iter, double &fret, 
                           std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
 {
 	int n = p.total();   //Check the vector has only one column first
@@ -95,50 +219,50 @@ void Minimization::dfpmin(cv::Mat &p, int &iter, double &fret,
 int Minimization::nextStep(cv::Mat &p, cv::Mat &xi, cv::Mat &g, cv::Mat &hessin, double &fret, 
                            std::function<double(cv::Mat)> &func, std::function<cv::Mat(cv::Mat)> &dfunc)
 {
-	const double EPS = std::numeric_limits<double>::epsilon();
-	//const double TOLX = 4 * EPS;
-	const double TOLX = 3.0e-8;
+  const double EPS = std::numeric_limits<double>::epsilon();
+  //const double TOLX = 4 * EPS;
+  const double TOLX = 3.0e-8;
   double den, fac, fad, fae, sumdg, sumxi;
   cv::Mat dg, hdg;
   //we use linmin uses brent method inside to look for the minimum in 1D
   fret = brentLineSearch(p, xi, func);
 				
   cv::Mat temp;
-	cv::Mat abs_p = cv::abs(p);
+  cv::Mat abs_p = cv::abs(p);
   abs_p.setTo(1.0, abs_p > 1.0);
     
-	cv::divide(cv::abs(xi), abs_p, temp);
+  cv::divide(cv::abs(xi), abs_p, temp);
   //If all of temp elements are lower than TOLX, algorithm terminates
   if ( cv::checkRange(temp, true, nullptr, 0.0, TOLX) ){std::cout << "minimum reached" << std::endl; return 1; }   //minimum reached
   
-	g.copyTo(dg);
-	g = dfunc(p);
+  g.copyTo(dg);
+  g = dfunc(p);
   
-	den = cv::max(fret, 1.0);
-	cv::multiply(cv::abs(g), abs_p / den, temp);
+  den = cv::max(fret, 1.0);
+  cv::multiply(cv::abs(g), abs_p / den, temp);
   
   if ( cv::checkRange(temp, true, nullptr, 0.0, gtol) ){std::cout << "minimum reached" << std::endl; return 1; }  //minimum reached
     
-	dg  = g - dg;
-	hdg = hessin * dg;
+  dg  = g - dg;
+  hdg = hessin * dg;
     
-	fac = fae = sumdg = sumxi = 0.0;
+  fac = fae = sumdg = sumxi = 0.0;
     
   fac = dg.dot(xi);
-	fae = dg.dot(hdg);
-	sumdg = dg.dot(dg);
-	sumxi = xi.dot(xi);
+  fae = dg.dot(hdg);
+  sumdg = dg.dot(dg);
+  sumxi = xi.dot(xi);
     
-	if (fac > std::sqrt(EPS * sumdg * sumxi)) 
+  if (fac > std::sqrt(EPS * sumdg * sumxi)) 
   {
-		fac = 1.0/fac;
-		fad = 1.0/fae;
-		dg = fac * xi - fad * hdg;   //Vector that makes BFGS different form DFP method
+    fac = 1.0/fac;
+    fad = 1.0/fae;
+    dg = fac * xi - fad * hdg;   //Vector that makes BFGS different form DFP method
       
     hessin += fac * xi * xi.t() - fad * hdg * hdg.t() + fae * dg * dg.t();
- 	}
+  }
     		
-	xi = -hessin * g;
+  xi = -hessin * g;
   return 0;   //minumum not found yet
 }
 
@@ -152,13 +276,13 @@ double Minimization::brentLineSearch(cv::Mat& p, cv::Mat& xi, std::function<doub
   
   std::function<double(double)> f1dim = std::bind(F1dim, std::placeholders::_1, p, xi, func);
   
-	bracket(0.0,1.0,f1dim);  //initial bounds conditions a=0, b=1
-	xmin = brent(f1dim);
+  bracket(0.0,1.0,f1dim);  //initial bounds conditions a=0, b=1
+  xmin = brent(f1dim);
 	  
   xi = xi * xmin;
   p = p + xi;
 
-	return fmin;
+  return fmin;
 }
 
 

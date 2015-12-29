@@ -24,10 +24,12 @@ int main()
   {
     
     SubimageLayout subimageLayout;
-    subimageLayout.computerGeneratedImage();
-
+    test_BSL();
+    //subimageLayout.computerGeneratedImage();
+    
+    
     //subimageLayout.navigateThrough();
-    //iterativeHardThresholding();
+    //test_fista();
   }
   catch (cv::Exception const & e)
   {

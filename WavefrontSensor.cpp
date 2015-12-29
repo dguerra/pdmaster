@@ -14,6 +14,7 @@
 //#include "FITS.h"
 #include "Metric.h"
 #include "Minimization.h"
+#include "CompressedSensing.h"
 #include <fstream>
 //ANEXO
 //How to get with python null space matrix from constraints, Q2
@@ -51,7 +52,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   }
 
   TelescopeSettings tsettings(d_size.width);
-  unsigned int numberOfZernikes = 14;   //total number of zernikes to be considered
+  unsigned int numberOfZernikes = 28;   //total number of zernikes to be considered
 
   std::vector<cv::Mat> D;
   for(cv::Mat di : d)
@@ -79,7 +80,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   cv::Mat Q2;
   partlyKnownDifferencesInPhaseConstraints(M, K, Q2);
   
-  //Used this: http://davidstutz.de/matrix-decompositions/matrix-decompositions/householder/demo
+  //Used this: http://davidstutz.de/matrix-decompositions/matrix-decompositions/householder
   //double q2_oneCoeff[] = {0, 0, 0, -0.70710678118655, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.70710678118655, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   //Q2 = cv::Mat(K*M, 1, cv::DataType<double>::type, q2_oneCoeff);
   
@@ -88,37 +89,63 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   
   
   Minimization minimizationKit;
-  minimizationKit.minimize(p, Q2, func, dfunc);
+  
+  minimizationKit.minimize(p, Q2, func, dfunc, Minimization::Method::FISTA);
   std::cout << "mimumum: " << p.t() << std::endl;
-
   return mm.F();
 }
 
-void WavefrontSensor::ista(cv::Mat& u,  const std::function<double(cv::Mat)>& func, const std::function<cv::Mat(cv::Mat)>& grad)
-{
-  double t(1.0);
-  double lambda(0.0001);
-  auto shrink = [] (const double& x, const double& alpha) -> double
+
+/*
+  //First attempt to solve through IHT
+  auto vec = [](const std::vector<cv::Mat> &matrixV, cv::Mat& vector)
   {
-    //return std::copysign(1.0, y) * std::max( std::abs(y)-alpha, 0.0);
-    return std::copysign(1.0, x) * std::abs(x)-alpha;
-  };
-  cv::Mat y;
-  u.copyTo(y);
-  for(unsigned int hh = 0; hh<1000; ++hh)
-  {
-    std::cout << "func(u): " << func(u) << std::endl; 
-    cv::Mat new_u = y - (splitComplex(grad(y)).first).mul(t);
-    cv::Mat diff = new_u - u;
-    new_u.copyTo(u);   //gradient at point u
-    for(unsigned int i = 0; i<u.total(); ++i)
+    std::vector<cv::Mat> vv;
+    for(size_t i = 0; i < matrixV.size(); ++i)
     {
-      u.at<double>(0,i) = shrink(u.at<double>(0,i), lambda*t);
+      for(unsigned int j = 0; j < matrixV.at(i).cols; ++j)
+      {
+        vv.push_back(matrixV.at(i).col(j)); 
+      }
     }
-    
-    t = ( 1.0 + std::sqrt(1.0+(4*t*t)) )/2.0;
-    y = u + ((t-1.0)/t)*(diff);
-  }
+    cv::vconcat(vv, vector);
+  };
   
-  std::cout << "u: " << u << std::endl; 
-}
+  //Keep only k largest  coefficients
+  auto hardThreshold = [](cv::Mat& p, const unsigned int& k)
+  {
+    cv::Mat mask = cv::Mat::ones(p.size(), CV_8U);
+    cv::Mat pp(cv::abs(p));
+    for(unsigned int i=0;i<k;++i)
+    {
+      cv::Point maxLoc;
+      cv::minMaxLoc(pp, nullptr,nullptr, nullptr, &maxLoc, mask);
+      mask.at<char>(maxLoc.y, maxLoc.x) = 0;
+    }
+    p.setTo(0.0, mask);
+  };
+  
+  cv::Mat x0 = cv::Mat::zeros(K*M, 1, cv::DataType<double>::type);
+  cv::Mat x0_imag = cv::Mat::zeros(K*M, 1, cv::DataType<double>::type);
+  double mu(1.0);
+  unsigned int sparsity(4);
+  for(unsigned int j =0; j<500; ++j)
+  {
+    std::vector<cv::Mat> De;
+    cv::Mat jacobian, measurement, observation;
+    mm.phi(x0, D, zBase, meanPowerNoise, De);
+    mm.compute_dphi(x0, D, zBase, meanPowerNoise, jacobian);
+    vec(De, measurement);
+    vec(D, observation);
+    cv::Mat est = mu * (observation - measurement);
+    cv::Mat zer = cv::Mat::zeros(est.size(), est.type());
+    std::vector<cv::Mat> x0_ = {x0, x0_imag};
+    cv::Mat x0_c;
+    cv::merge(x0_, x0_c);
+    cv::gemm(conjComplex(jacobian), est, -1.0, x0_c, 1.0, x0_c, cv::GEMM_1_T);
+    x0 = splitComplex(x0_c).first;
+    hardThreshold(x0, sparsity);
+    
+    std::cout << "x0: " << x0.t() << std::endl;
+  }
+*/

@@ -13,5 +13,8 @@
 
 void dctMatrix(const unsigned int& m, const unsigned int& n, cv::Mat& mat);
 void matchingPursuit();
-void iterativeHardThresholding();
+void test_IHT();
+void iterativeHardThresholding( const cv::Mat& observation, const cv::Mat& measurement, cv::Mat&  x0, const unsigned int& sparsity, 
+                                const double& mu, const unsigned int& numberOfIterations);
+                                
 #endif /* COMPRESSEDSENSING_H_ */

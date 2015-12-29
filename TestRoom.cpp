@@ -16,16 +16,19 @@
 #include "NoiseEstimator.h"
 #include "OpticalSystem.h"
 #include "FITS.h"
-//#include "AWMLE.h"
+#include "CompressedSensing.h"
 #include "TelescopeSettings.h"
 #include "ImageQualityMetric.h"
 #include "Minimization.h"
 #include "curvelab/fdct_wrapping.hpp"
 #include "curvelab/fdct_wrapping_inline.hpp"
+#include "SBL.h"
 
 #include "Curvelets.h"
 
 
+//cv::randn(cv::Mat a, cv::Mat mean, cv::Mat std)
+//fill matrix a with random values from normal distribution with mean vector and std matrix
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
 {
@@ -41,6 +44,161 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
   }
   return A;
 }
+
+bool test_BSL()
+{
+  unsigned int M = 10;//80;          // row number of the dictionary matrix 
+  unsigned int N = 20;//162;          // column number
+
+  unsigned int blkNum = 3;       // nonzero block number
+  unsigned int blkLen = 2;       // block length
+
+  double SNR = 50;         // Signal-to-noise ratio
+
+  cv::Mat Phi(M, N, cv::DataType<double>::type);
+  cv::randn(Phi, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(1.0)), cv::Mat::ones(1, 1, cv::DataType<double>::type));
+  cv::Mat PhiPhi, sumPhiPhi, sqrtsumPhiPhi;
+  cv::multiply(Phi, Phi, PhiPhi);
+  cv::reduce(PhiPhi, sumPhiPhi, 0, CV_REDUCE_SUM);   //sum every column a reduce matrix to a single row
+  cv::sqrt(sumPhiPhi, sqrtsumPhiPhi);
+  cv::divide(Phi, cv::Mat::ones(M,1,cv::DataType<double>::type) * sqrtsumPhiPhi, Phi);
+
+
+  unsigned int totalBlkNumber = N/blkLen;
+  cv::Mat wgen = cv::Mat::zeros(totalBlkNumber, blkLen, cv::DataType<double>::type);
+  
+  cv::RNG rng(cv::getTickCount());
+  for(unsigned int i=0; i<blkNum; ++i)
+  {
+    cv::Mat r(1, blkLen, cv::DataType<double>::type);
+    randn(r, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(rng.uniform(-10.0, 10.0)) ), cv::Mat::ones(1, 1, cv::DataType<double>::type));
+    r.copyTo(wgen.row(i));
+  }
+
+  auto shuffleRows = [](const cv::Mat &matrix) -> cv::Mat
+  {
+    
+    std::vector <int> seeds;
+    for (int cont = 0; cont < matrix.rows; cont++)
+    {
+      seeds.push_back(cont);
+    }
+    cv::theRNG() = cv::RNG( cv::getTickCount() );
+    cv::randShuffle(seeds);
+
+    cv::Mat output;
+    for (int cont = 0; cont < matrix.rows; cont++)
+    {
+      output.push_back(matrix.row(seeds[cont]));
+    }
+    return output;
+  };
+  
+  cv::Mat nwgen = shuffleRows(wgen);
+  cv::Mat xgen = nwgen.reshape(0, nwgen.total());
+  cv::Mat signal = Phi * xgen;   //noiseless signal
+  
+  // Observation noise   
+  cv::Scalar mean, stddev;
+  cv::meanStdDev(signal, mean, stddev);
+  cv::Mat noise(signal.size(), signal.type());
+  cv::randn(noise, cv::Scalar(0.0), cv::Scalar(stddev*std::pow(10,-SNR/20.0)));
+  // Noisy signal
+  cv::Mat y = signal + noise;
+  
+  /*
+  double Phi_array[] = { 0.085418, -0.304933,  0.832896, 0.578306, -0.817437,  0.604256,
+                         0.976559, -0.417760, -0.499972, 0.782559,  0.096814, -0.025679,
+                        -0.197578,  0.855858, -0.237303, 0.230571, -0.567823,  0.796377 };
+  cv::Mat nPhi(3, 6, cv::DataType<double>::type, Phi_array);
+  double y_array[] = {0.0045347, 0.0034440, 0.0414892 };
+  cv::Mat ny(3, 1, cv::DataType<double>::type, y_array);
+  */
+  
+  BSBL::perform_BSBL(Phi, y, BSBL::NoiseLevel::LittleNoise, blkLen);
+  std::cout << "xgen: " << xgen << std::endl;
+  return true;
+}
+
+
+
+/*
+void test_nonlinearCompressedSensing()
+{
+  //Test compressed sensing technique over a non-linear measurement process by using the jacobian
+  std::function<double(cv::Mat)> fx = [] (cv::Mat x) -> double 
+  { //fx = u^3-v^2
+    return std::pow(x.at<double>(0,0),3) - std::pow(x.at<double>(1,0),2);
+  };
+  
+  std::function<double(cv::Mat)> fy = [] (cv::Mat x) -> double 
+  { //fy = u^3+v^2
+    return std::pow(x.at<double>(0,0),3) + std::pow(x.at<double>(1,0),2);
+  };
+  
+  std::function<cv::Mat(cv::Mat)> jf = [] (cv::Mat x) -> cv::Mat
+  { //Jacobian matrix function: function derivative with every variable
+    cv::Mat t(2,2, cv::DataType<double>::type);
+    t.at<double>(0,0) = 3 * std::pow(x.at<double>(0,0),2);   //dfx/du
+    
+    t.at<double>(1,0) = 3 * std::pow(x.at<double>(0,0),2);   //dfy/du
+                            
+    t.at<double>(0,1) = -2.0 * x.at<double>(1,0);            //dfx/dv
+    
+    t.at<double>(1,1) =  2.0 * x.at<double>(1,0);            //dfy/dv
+    return t;
+  };
+  
+  cv::Mat x0 = cv::Mat::ones(2, 1, cv::DataType<double>::type);
+  
+  cv::Mat y = -(3*3);
+}
+*/
+
+void test_fista()
+{
+  std::function<double(cv::Mat)> funcc = [] (cv::Mat x) -> double 
+  {//Eq to minimize: x1^8-3*(x1+3)^5+5+(x2+4)^6+x2^5+3*x3^2+x4^4
+    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
+           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5) + 3 * std::pow(x.at<double>(2,0),2) + 
+           std::pow(x.at<double>(3,0),4);
+           
+  };
+  
+  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat x) -> cv::Mat
+  { //Gradient vector function: function derivative with every variable
+    cv::Mat t(4,1, cv::DataType<double>::type);  //Size(3,1)->1 row, 2 colums
+    t.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
+                            std::pow(x.at<double>(0,0)+3,4);
+    
+    t.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
+                            std::pow(x.at<double>(1,0)+4,5);
+    t.at<double>(2,0) = 6 * x.at<double>(2,0);
+    t.at<double>(3,0) = 4 * std::pow(x.at<double>(3,0),3);
+    return t;
+  };
+  
+
+  double lambda = 1.0;
+  auto perform_soft_thresholding = [lambda](cv::Mat x, double tau)-> cv::Mat
+  {
+    //   Proximal operator for the scalar L1 norm.
+    //   y = prox_{tau*|.|_1}(x) = max(0,1-tau/|x|)*x
+    //y = max(0,1-tau./max(abs(x),1e-10)).*x;
+    return cv::max(0.0, 1.0 - (lambda*tau)/cv::abs(x)).mul(x);
+  };
+  
+  double L = 10.0;
+  //double L = 1.0;
+  cv::Mat x = cv::Mat::zeros(4, 1, cv::DataType<double>::type);
+  auto L1_norm = [lambda](cv::Mat x) -> double
+  {
+    return lambda * norm(x, cv::NORM_L1);
+  };
+  Minimization mm;
+  mm.perform_FISTA(x, L1_norm, funcc, perform_soft_thresholding, dfuncc, L); 
+}
+
 
 //fdct_wrapping_demo_denoise -- Image denoising using Curvelets
 bool test_curveletDemoDenoise()
