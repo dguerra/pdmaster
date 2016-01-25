@@ -32,7 +32,7 @@ SubimageLayout::~SubimageLayout()
 void SubimageLayout::computerGeneratedImage()
 {
   //Benchmark
-  int isize = 42; //32; //128;
+  int isize = 42; //16; //22; //42; //32; //128; //42;
   cv::Mat img;
   if(true)
   {
@@ -45,17 +45,36 @@ void SubimageLayout::computerGeneratedImage()
     
     img = img(rect1).clone();
     cv::normalize(img, img, 0, 1, CV_MINMAX);
+    //writeFITS(img, "../img.fits");
     std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
   }
   
-  int M = 14*2;
+    /*
+  for (int r = 0; r < img.rows; r += N)
+  {
+    for (int c = 0; c < img.cols; c += N)
+    {
+        cv::Mat tile = img(cv::Range(r, min(r + N, img.rows)),
+                     cv::Range(c, min(c + N, img.cols)));//no data copying here
+        //cv::Mat tileCopy = img(cv::Range(r, min(r + N, img.rows)),
+                     //cv::Range(c, min(c + N, img.cols))).clone();//with data copying
+
+        //tile can be smaller than NxN if image size is not a factor of N
+        your_function_processTile(tile);
+    }
+  }
+  */
+
+  int M = 14;
   TelescopeSettings ts(img.cols);
+  //double data[] = { 0.0, 0.0, 0.0, 0.0, 0.21, 0.22, 0.0, 0.0, 0.0, 0.0, 0.75, 0.74, 0.0, 0.0 };
   //double data[] = { 0.0, 0.0, 0.0, 0.3, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-  double data[] = {   0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+  double data[] =   { 0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9}; // 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
   cv::Mat coeffs(M, 1, cv::DataType<double>::type, data);
   cv::Mat d1, d2;
-  aberrate(img, coeffs, ts.pupilRadiousPixels(), 0.0,    0.06, d1);
-  aberrate(img, coeffs, ts.pupilRadiousPixels(), ts.k(), 0.06, d2);
+  double sigma_noise = 0.0;
+  aberrate(img, coeffs, ts.pupilRadiousPixels(), 0.0,    sigma_noise, d1);
+  aberrate(img, coeffs, ts.pupilRadiousPixels(), ts.k(), sigma_noise, d2);
 
   ImageQualityMetric iqm;
   cv::Mat d1_n;
@@ -76,7 +95,7 @@ void SubimageLayout::computerGeneratedImage()
   noiseDefocused.meanPowerSpectrum(d2);
   
   //double meanPower = (sigma.val[0]*sigma.val[0])/d1.total();
-  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
+  std::vector<double> meanPowerNoise = {0.0, 0.0}; //{noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
   cv::Mat object = wSensor.WavefrontSensing(d, meanPowerNoise);
   fftShift(object);
   cv::idft(object, object, cv::DFT_REAL_OUTPUT);
@@ -119,7 +138,7 @@ void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs
   cv::Mat noise(img.size(), cv::DataType<double>::type);
   cv::Scalar sigma(sigmaNoise), m_(0);
   
-  cv::theRNG() = cv::RNG( time (0) );
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
   cv::randn(noise, m_, sigma);
   
   cv::add(aberratedImage, noise, aberratedImage);

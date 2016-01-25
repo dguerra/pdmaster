@@ -47,13 +47,13 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
 
 bool test_BSL()
 {
-  unsigned int M = 10;//80;          // row number of the dictionary matrix 
-  unsigned int N = 20;//162;          // column number
+  unsigned int M = 80;          // row number of the dictionary matrix 
+  unsigned int N = 164;          // column number
 
-  unsigned int blkNum = 3;       // nonzero block number
-  unsigned int blkLen = 2;       // block length
+  unsigned int blkNum = 7;       // nonzero block number
+  unsigned int blkLen = 4;       // block length
 
-  double SNR = 50;         // Signal-to-noise ratio
+  double SNR = 80;         // Signal-to-noise ratio
 
   cv::Mat Phi(M, N, cv::DataType<double>::type);
   cv::randn(Phi, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(1.0)), cv::Mat::ones(1, 1, cv::DataType<double>::type));
@@ -63,7 +63,6 @@ bool test_BSL()
   cv::sqrt(sumPhiPhi, sqrtsumPhiPhi);
   cv::divide(Phi, cv::Mat::ones(M,1,cv::DataType<double>::type) * sqrtsumPhiPhi, Phi);
 
-
   unsigned int totalBlkNumber = N/blkLen;
   cv::Mat wgen = cv::Mat::zeros(totalBlkNumber, blkLen, cv::DataType<double>::type);
   
@@ -71,7 +70,7 @@ bool test_BSL()
   for(unsigned int i=0; i<blkNum; ++i)
   {
     cv::Mat r(1, blkLen, cv::DataType<double>::type);
-    randn(r, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(rng.uniform(-10.0, 10.0)) ), cv::Mat::ones(1, 1, cv::DataType<double>::type));
+    randn(r, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(rng.uniform(50.0, 100.0)) ), 0.01 * cv::Mat::ones(1, 1, cv::DataType<double>::type));
     r.copyTo(wgen.row(i));
   }
 
@@ -114,9 +113,10 @@ bool test_BSL()
   double y_array[] = {0.0045347, 0.0034440, 0.0414892 };
   cv::Mat ny(3, 1, cv::DataType<double>::type, y_array);
   */
-  
-  BSBL::perform_BSBL(Phi, y, BSBL::NoiseLevel::LittleNoise, blkLen);
-  std::cout << "xgen: " << xgen << std::endl;
+  //OptAlg
+  cv::Mat res = BSBL::perform_BSBL(Phi, y, BSBL::NoiseLevel::Noisy, blkLen);
+  std::cout << "xgen: " << xgen.t() << std::endl;
+  std::cout << "res: " << res.t() << std::endl;
   return true;
 }
 

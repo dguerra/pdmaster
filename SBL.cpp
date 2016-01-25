@@ -12,23 +12,39 @@
 #include <limits>
 #include <list>
 
-void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, const unsigned int& blkLength)
+cv::Mat BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, const unsigned int& blkLength)
 {
-  // scaling...
-  cv::Mat y(y0);
+  cv::Mat y, Phi, Phi_0;
+  bool ComplexValued(false);
+  if(y0.channels() == 2 || Phi0.channels() == 2)
+  {
+    complexToRealValued(Phi0, y0, Phi, y);
+    ComplexValued = true;
+  }
+  else if(y0.channels() == 1 && Phi0.channels() == 1) 
+  {
+    y0.copyTo(y);
+    Phi0.copyTo(Phi);
+    ComplexValued = false;
+  }
+  else throw CustomException("Invalid number of channels of input matrices.");
+
+  Phi.copyTo(Phi_0);   //Save a copy of the initial Phi for later use
+ 
+  // scaling... 
   cv::Scalar mean, std;
-  cv::meanStdDev(y0, mean, std);
-  double std_n = sqrt(std.val[0]*std.val[0]*y0.total()/(y0.total()-1));   //Std normalized to N-1 isntead of N
+  cv::meanStdDev(y, mean, std);
+  double std_n = sqrt(std.val[0]*std.val[0]*y.total()/(y.total()-1));   //Std normalized to N-1 isntead of N
   if ((std_n < 0.4) | (std_n > 1)) y = 0.4*y/std_n;
   // Default Parameter Values for Any Cases
-  double EPSILON       = 1e-8;      // solution accurancy tolerance  
-  unsigned int MAX_ITERS     = 800;        // maximum iterations
+  double EPSILON       =  1e-8;      // solution accurancy tolerance  
+  unsigned int MAX_ITERS     = 600;        // maximum iterations
   bool PRINT         = true;          // don't show progress information
   bool intrablockCorrelation = true;          // adaptively estimate the covariance matrix B
   double PRUNE_GAMMA;
   double lambda;
-  if(Phi0.cols%blkLength != 0) throw CustomException("Invalid block length: Number of cols of Phi0 should be multiple of block lengh.");
-  unsigned int blkNumber(Phi0.cols/blkLength);    //total number of blocks
+  if(Phi.cols%blkLength != 0) throw CustomException("Invalid block length: Number of cols of Phi should be multiple of block lengh.");
+  unsigned int blkNumber(Phi.cols/blkLength);    //total number of blocks
   
   if (LearnLambda == NoiseLevel::Noiseless) { lambda = 1e-12;   PRUNE_GAMMA = 1e-3; }
   else if(LearnLambda == NoiseLevel::LittleNoise) { lambda = 1e-3;    PRUNE_GAMMA = 1e-2; }
@@ -50,12 +66,10 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
   }
   
   // Initialization: [N,M] = size(Phi);
-  unsigned int N = Phi0.rows;
-  unsigned int M = Phi0.cols;
+  unsigned int N = Phi.rows;
+  unsigned int M = Phi.cols;
   std::cout << "N: " << N << ", M: " << M << std::endl;
   std::list<Block> blkList;
-  
-  cv::Mat Phi = Phi0.clone();  //Save a copy of Phi to use after
   
   //Initialize block list: same size blocks
   for(unsigned int k=0; k<blkNumber; ++k)
@@ -72,7 +86,7 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
   while (1)
   {
     ++count;
-    //if(count == 3) break;
+    //std::cout << "SBL Iteration: " << count << std::endl;
     blkList.remove_if( [PRUNE_GAMMA](const Block& blk)->bool {return blk.gamma() < PRUNE_GAMMA;} );
     
     if(lsize != blkList.size())
@@ -93,16 +107,15 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
       for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
       {
         //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
-        cv::Mat ex = Phi0(cv::Range::all(), cv::Range(blk->startLoc(), blk->startLoc() + blk->length()));
+        cv::Mat ex = Phi_0(cv::Range::all(), cv::Range(blk->startLoc(), blk->startLoc() + blk->length()));
         v_Phi.push_back( ex.clone() );
       }
-      
       cv::hconcat(v_Phi, Phi);
     }
 
     //=================== Compute new weights =================
     cv::Mat mu_old = mu_x.clone();  //Save solution vector for later
-    
+  
     cv::Mat PhiBPhi = cv::Mat::zeros(N, N, cv::DataType<double>::type);
     //for(Block blk : blkList)
     pos = 0;
@@ -173,17 +186,34 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
     {
       if(LearnLambda == NoiseLevel::Noisy)
       {
-        lambdaComp += cv::trace(Phi(cv::Range::all(), cv::Range(pos, pos + blk->length())) * blk->Sigma_x() * Phi(cv::Range::all(), cv::Range(pos, pos + blk->length())).t()).val[0];
+        lambdaComp += cv::trace( Phi(cv::Range::all(), cv::Range(pos, pos + blk->length())) * blk->Sigma_x() * 
+                                 Phi(cv::Range::all(), cv::Range(pos, pos + blk->length())).t() ).val[0];
       }
       else if(LearnLambda == NoiseLevel::LittleNoise)
       {
         lambdaComp += cv::trace(blk->Sigma_x() * invB).val[0] / blk->gamma(); 
       }
       
-      pos += blk->length();
       
-      blk->gamma( cv::trace(invB * blk->Cov_x()).val[0] / blk->Cov_x().cols );
+      if(true)
+      {
+        blk->gamma( cv::trace(invB * blk->Cov_x()).val[0] / blk->Cov_x().cols );
+      }
+      else
+      {
+        //gamma(i) = gamma_old(i)*norm( sqrtm(B{i})*Hy(currentSeg) )/sqrt(trace(HPhi(currentSeg,currentSeg)*B{i}));
+        cv::Mat eigenvalues, eigenvectors, sqrt_eigenvalues;
+        cv::eigen(B, eigenvalues, eigenvectors);
+        cv::sqrt(eigenvalues, sqrt_eigenvalues);
+        cv::Mat sqrtB = eigenvectors.t() * cv::Mat::diag(sqrt_eigenvalues) * eigenvectors;
+        double num = blk->gamma() * cv::norm( sqrtB * Hy(cv::Range(pos, pos + blk->length()), cv::Range::all()), cv::NORM_L2 );
+        double den = std::sqrt( cv::trace( HPhi(cv::Range(pos, pos + blk->length()), cv::Range(pos, pos + blk->length())) * B).val[0] );
+        blk->gamma( num / den );
+      }
+      
       blk->Sigma_0( B * blk->gamma() );
+      
+      pos += blk->length();
     }
     
     //LearnLambda == Noiseless, means no lambda value should be estimated
@@ -201,6 +231,26 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
     // ================= Check stopping conditions, eyc. ==============
     if ( mu_x.total() == mu_old.total() )
     {
+      ///////////////////////////////////////////////////////
+      // reconstruct the original signal &  Expand hyperparameyers
+      cv::Mat xx = cv::Mat::zeros(M,1, cv::DataType<double>::type);
+      pos = 0;
+      for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
+      {
+        mu_x(cv::Range(pos, pos + blk->length()), cv::Range::all()).copyTo( xx(cv::Range(blk->startLoc(), blk->startLoc() + blk->length()), cv::Range::all()) );
+        pos += blk->length();
+      }
+      if(ComplexValued)
+      {
+        cv::Mat xx_real = xx( cv::Range(0, xx.total()/2), cv::Range::all() ).clone();
+        cv::Mat xx_imag = xx( cv::Range(xx.total()/2, xx.total()), cv::Range::all() ).clone();
+        std::vector<cv::Mat> xx_v = {xx_real, xx_imag};
+        cv::merge(xx_v, xx);
+      }
+      //std::cout << "xx: " << xx.t() << std::endl;
+      ///////////////////////////////////////////////////////
+      
+      
       cv::Mat diff;
       cv::absdiff(mu_old, mu_x, diff);
       double maxVal;
@@ -220,7 +270,7 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
 //                   " gamma change: " << max(abs(gamma - gamma_old)) << std::endl <<
 //                   " mu change: " << dmu << std::endl;
     }
-    if (count >= MAX_ITERS)
+    if (count >= 100)  //MAX_ITERS
     {
       if(PRINT)
       {
@@ -239,17 +289,63 @@ void BSBL::perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel
   pos = 0;
   for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
   {
-    gamma_est.at(blk->number()) = blk->gamma();
     mu_x(cv::Range(pos, pos + blk->length()), cv::Range::all()).copyTo( x(cv::Range(blk->startLoc(), blk->startLoc() + blk->length()), cv::Range::all()) );
     pos += blk->length();
   }
+  if(ComplexValued)
+  {
+    cv::Mat xx_real = x( cv::Range(0, M/2), cv::Range::all() ).clone();
+    cv::Mat xx_imag = x( cv::Range(M/2, M), cv::Range::all() ).clone();
+    std::vector<cv::Mat> x_v = {xx_real, xx_imag};
+    cv::merge(x_v, x);
+  }
+  std::cout << "x: " << x.t() << std::endl;
+  
   if(PRINT)
   {
-    std::cout << "gamma_est:" << std::endl;
-    for_each(gamma_est.begin(), gamma_est.end(), [](const double& d){std::cout << d << std::endl;});
+    std::cout << "Number of iterations: " << count << std::endl;
+    //std::cout << "gamma_est:" << std::endl;
+    //for_each(gamma_est.begin(), gamma_est.end(), [](const double& d){std::cout << d << std::endl;});
   }
   
   if ((std_n < 0.4) | (std_n > 1))  x = x * std_n/0.4;
-  std::cout << "x: " << x << std::endl;
-  return;
+  return x.clone();
+}
+
+void BSBL::complexToRealValued(const cv::Mat& Phi0, const cv::Mat& y0, cv::Mat& Phi, cv::Mat& y)
+{
+  if(y0.channels() == 2)
+  {
+    std::vector<cv::Mat> y0_chnnls;
+    cv::split(y0, y0_chnnls);
+    cv::vconcat(y0_chnnls, y);
+  }
+  else
+  {
+    std::vector<cv::Mat> y0_chnnls = {y0, cv::Mat::zeros(y0.size(), y0.type())};
+    cv::vconcat(y0_chnnls, y);
+  }
+  
+  if(Phi0.channels() == 2)
+  {
+    std::vector<cv::Mat> Phi0_chnnls;
+    cv::split(Phi0, Phi0_chnnls);
+    std::vector<cv::Mat> upperMatrix = {Phi0_chnnls.at(0), -1.0 * Phi0_chnnls.at(1)};
+    std::vector<cv::Mat> lowerMatrix = {Phi0_chnnls.at(1),        Phi0_chnnls.at(0)};
+    cv::Mat uM, lM;
+    cv::hconcat(upperMatrix, uM);
+    cv::hconcat(lowerMatrix, lM);
+    std::vector<cv::Mat> PhiM = {uM, lM};
+    cv::vconcat(PhiM, Phi);
+  }
+  else
+  {
+    std::vector<cv::Mat> upperMatrix = {Phi0, cv::Mat::zeros(Phi0.size(), Phi0.type())};
+    std::vector<cv::Mat> lowerMatrix = {cv::Mat::zeros(Phi0.size(), Phi0.type()), Phi0};
+    cv::Mat uM, lM;
+    cv::hconcat(upperMatrix, uM);
+    cv::hconcat(lowerMatrix, lM);
+    std::vector<cv::Mat> PhiM = {uM, lM};
+    cv::vconcat(PhiM, Phi);
+  }
 }

@@ -105,7 +105,7 @@ void test_IHT()
     {
       seeds.push_back(cont);
     }
-    cv::theRNG() = cv::RNG( time (0) );
+    cv::theRNG() = cv::RNG( cv::getTickCount() );
     cv::randShuffle(seeds);
 
     cv::Mat output;
@@ -146,7 +146,7 @@ void test_IHT()
   cv::Mat eye_nn = cv::Mat::eye(isize, isize, cv::DataType<double>::type);
   cv::idct(eye_nn, phi, cv::DCT_ROWS);
   phi = phi.t();
-//  cv::Mat psi;  //sensing matrix. dimension reduction
+//  cv::Mat psi;  //sensing matrix. dimension reduction
   unsigned int a = 60;  //number of incoheren measurements
   cv::Mat shuffle_eye = shuffleRows(eye_nn);
   cv::Mat A = shuffle_eye(cv::Range(0, a), cv::Range::all());

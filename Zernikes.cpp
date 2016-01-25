@@ -222,6 +222,7 @@ cv::Mat Zernikes::zernike_function(const double& lambda, const double& r_c, cons
     for(int y=1;y<=nph;++y) 
     {
       //z[x][y]/=lambda*std::sqrt(sum);
+      z[x][y] /= 8.0 * std::sqrt(sum);    //test
       Z.at<double>(x-1, y-1) = z[x][y];
     }
   }

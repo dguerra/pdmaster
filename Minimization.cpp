@@ -68,10 +68,10 @@ void Minimization::minimize(cv::Mat &p, const cv::Mat &Q2,
   {
     perform_BFGS(p_constrained, iter_, fret_, f_constrained, df_constrained);
   }
-  else  if(method == Method::FISTA)   //perform_FISTA
+  else if(method == Method::FISTA)   //perform_FISTA
   {
-        //double lambda = 1.5;
-    double lambda = 1.0;
+    //double lambda = 1.0;  //default
+    double lambda = 2.0;
     auto perform_soft_thresholding = [lambda](cv::Mat x, double tau)-> cv::Mat
     {
       //   Proximal operator for the scalar L1 norm.
@@ -141,14 +141,14 @@ void Minimization::perform_FISTA(cv::Mat& x, const std::function<double(cv::Mat)
 
 
   unsigned int maxline(20);
-  unsigned int maxiter(1000);
-  double Lstep(2.5);
+  unsigned int maxiter(800);
+  double Lstep(1.5);
   
   double t = 1.0;
   cv::Mat y = x.clone();
   cv::Mat x0 = x.clone();
   double fval =  std::numeric_limits<double>::max();
-  double epsilon = 0.0000000001; //0.0000001; //std::numeric_limits<double>::epsilon();
+  double epsilon = std::numeric_limits<double>::epsilon(); //0.0000000001;
     
   for (unsigned int i=0;i<maxiter;++i)
   {

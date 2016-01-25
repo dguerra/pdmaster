@@ -48,7 +48,9 @@ class BSBL
     // Noisy: when SNR < 25dB, set learnlambda = 1; General noisy cases.
     // Noisy: when SNR >=25dB, set learnlambda = 2; 
     // Noiseless: when no noise present, set learnlambda = 0;
-    static void perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, const unsigned int& blkLength);
+    static cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, const unsigned int& blkLength);
+  private:
+    static void complexToRealValued(const cv::Mat& Phi0, const cv::Mat& y0, cv::Mat& Phi, cv::Mat& y);
 
 };    
 

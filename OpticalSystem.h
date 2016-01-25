@@ -8,6 +8,7 @@
 #ifndef OPTICALSYSTEM_H_
 #define OPTICALSYSTEM_H_
 #include "opencv2/opencv.hpp"
+//Rename module as simply "Optics"
 
 class OpticalSystem
 {
