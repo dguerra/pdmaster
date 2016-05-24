@@ -1,11 +1,11 @@
-#include "PDTools.h"
+#include "ToolBox.h"
 #include "CustomException.h"
 
 #include <iostream>
 
 #include "NoiseEstimator.h"
-#include "TelescopeSettings.h"
-#include "Zernikes.h"
+#include "OpticalSetup.h"
+#include "BasisRepresentation.h"
 #include "FITS.h"
 
 NoiseEstimator::NoiseEstimator()
@@ -55,13 +55,13 @@ void NoiseEstimator::meanPowerSpectrum(const cv::Mat& img)
     cv::Mat powerSpectrum;
     cv::mulSpectrums(IMG, IMG, powerSpectrum, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE, conjB);
     //A mask has to be applied to before calculating the sigma
-    TelescopeSettings tsettings(img.cols);
+    OpticalSetup tsettings(img.cols);
     std::cout << "cutoffPixel: " << tsettings.cutoffPixel() << std::endl;
     cv::Mat mask = cv::Mat::ones(powerSpectrum.size(), powerSpectrum.depth());
 
     //Mask to onlyu consider pixel values after cutoff, which are due to noise only
-    mask.setTo(0, Zernikes::phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
-    //mask.setTo(0, Zernikes::phaseMapZernike(1, mask.cols, mask.cols/2) != 0);
+    mask.setTo(0, BasisRepresentation::phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
+    //mask.setTo(0, BasisRepresentation::phaseMapZernike(1, mask.cols, mask.cols/2) != 0);
     mask.colRange(int((mask.cols/2)-(mask.cols/6)),int((mask.cols/2)+(mask.cols/6))) = cv::Scalar(0);
     mask.rowRange(int((mask.rows/2)-(mask.rows/6)),int((mask.rows/2)+(mask.rows/6))) = cv::Scalar(0);
 

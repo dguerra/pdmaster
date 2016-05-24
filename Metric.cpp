@@ -5,12 +5,11 @@
  *      Author: dailos
  */
 #include "Metric.h"
-#include "PDTools.h"
-#include "TelescopeSettings.h"
+#include "ToolBox.h"
+#include "OpticalSetup.h"
 #include "CustomException.h"
-#include "Zernikes.h"
+#include "BasisRepresentation.h"
 #include "FITS.h"
-#include "Zernikes.h"
 
 //Isolate meanPowerNoise into an independent noise filter function within Metric class
 //Build zernike base only once and keep it inside Metric class as a private member
@@ -18,12 +17,24 @@
 //To bind the arguments of the member function "hello", within "object"
 //Metric m;
 //auto f = std::bind(&Metric::metric_from_coefs, &m, std::placeholders::_1);
-Metric::Metric(const std::vector<cv::Mat>& D, const double& pupilRadiousPxls)
+Metric::Metric(const std::vector<cv::Mat>& D, const double& pupilRadiousPxls, const unsigned int& numberOfElements)
 {
   pupilRadiousPxls_ = pupilRadiousPxls;
   
   for(auto Dk : D) D_.push_back(Dk.clone());
-  
+   
+  //zernikeBase_ is static variable so it's initialied once and for all!
+  if(zernikeBase_.empty() == true || zernikeBase_.size() != numberOfElements)  //Only if zernikeBase_ is empty
+  {
+    zernikeBase_.clear();
+    
+    for(unsigned int indx=1; indx <= numberOfElements; ++indx)
+    {
+      //double cte = 1.0/10.0;
+      double cte = 1.0;
+      zernikeBase_.push_back( cte * BasisRepresentation::phaseMapZernike(indx, D_.front().size().width, pupilRadiousPxls_));
+    }
+  }
 }
 
 Metric::~Metric()
@@ -31,52 +42,43 @@ Metric::~Metric()
   // TODO Auto-generated destructor stub
 }
 
-void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, std::vector<OpticalSystem>& OS)
+void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, std::vector<Optics>& OS)
 {
-  if( zernikeBase_.empty() == true )
-  {
-    zernikeBase_ = Zernikes::zernikeBase(coeffs.total()/D_.size(), D_.front().size().width, pupilRadiousPxls_);
-  }
-  
   //check input dimensions
   if(coeffs.cols != 1) throw CustomException("Wrong input dimensions");
   
   //Start populating vector from scratch
   OS.clear();
-  TelescopeSettings tsettings(D_.front().size().width);
+  OpticalSetup tsettings(D_.front().size().width);
   unsigned int pupilSideLength = D_.front().size().width;
   
   unsigned int K = D_.size();   //number of images to use in the algorithm
   unsigned int M = zernikeBase_.size();   //number of zernike coefficients to use in the representation of each image phase
   if(K * M != coeffs.total()) throw CustomException("Coeffcient vector should contain K*M elements.");
-    
-  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
+  //double cte = 1.0/10.0;
+  double cte = 1.0;//100.0;
+  cv::Mat pupilAmplitude = cte *BasisRepresentation::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
 
-  const double lambda = 4.69600e-7;
-  const double pi = 3.141592;
-  
-  ////////Consider the case of two diversity images
+  //Consider the case of two diversity images
   std::vector<double> diversityFactor = {0.0, tsettings.k()};
-  cv::Mat z4 = Zernikes::phaseMapZernike(4, pupilSideLength, tsettings.pupilRadiousPixels() );
-  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
+  
   std::vector<cv::Mat> diversityPhase;
   for(double dfactor : diversityFactor)
   {
-    //defocus zernike coefficient: c4 = dfactor * PI/(2.0*std::sqrt(3.0))
-	  diversityPhase.push_back( (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen));
-    //diversityPhase.push_back(dfactor * z4);
+    cv::Mat dPhase_i = (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * cte * BasisRepresentation::phaseMapZernike(4, pupilSideLength, tsettings.pupilRadiousPixels(), false);
+	  diversityPhase.push_back( dPhase_i );
   }
   ////////
   
   for(unsigned int k=0; k<K; ++k)
   {  //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
-    cv::Mat pupilPhase_i = Zernikes::phaseMapZernikeSum(pupilSideLength,tsettings.pupilRadiousPixels(), coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
-    OS.push_back(OpticalSystem(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
+    cv::Mat pupilPhase_i = BasisRepresentation::phaseMapZernikeSum(pupilSideLength,tsettings.pupilRadiousPixels(), coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
+    OS.push_back(Optics(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
   }
  
 }
 
-void Metric::computeQ(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& Q)
+void Metric::computeQ(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<Optics>& OS, cv::Mat& Q)
 {
    //We use 'depth' here instead of 'type' because we want 1-channel image
   Q = cv::Mat::zeros(D_.front().size(), D_.front().type());
@@ -90,11 +92,11 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<double>& meanPowe
     cv::accumulate(absSj2, Q); //equivalent to Q += (absSj)^2 === absSj.mul(absSj);
   }
   
-  TelescopeSettings tsettings(D_.front().cols);
-  Q.setTo(0, Zernikes::phaseMapZernike(1, Q.cols, tsettings.cutoffPixel()) == 0);
+  OpticalSetup tsettings(D_.front().cols);
+  Q.setTo(0, BasisRepresentation::phaseMapZernike(1, Q.cols, tsettings.cutoffPixel()) == 0);
 }
 
-void Metric::compute_dQ(const cv::Mat& zernikeElement, const std::vector<OpticalSystem>& OS, const unsigned int& j, cv::Mat& dQ)
+void Metric::compute_dQ(const cv::Mat& zernikeElement, const std::vector<Optics>& OS, const unsigned int& j, cv::Mat& dQ)
 {
   //We use 'depth' here instead of 'type' because we want 1-channel image
   cv::Mat Sj = OS.at(j).otf().clone();
@@ -109,7 +111,7 @@ void Metric::compute_dQ(const cv::Mat& zernikeElement, const std::vector<Optical
 }
 
 
-void Metric::computeP(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<OpticalSystem>& OS, cv::Mat& P)
+void Metric::computeP(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<Optics>& OS, cv::Mat& P)
 {
   P = cv::Mat::zeros(D_.front().size(), D_.front().type());
 
@@ -124,11 +126,11 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<double>& meanPowe
     cv::mulSpectrums(D_.at(j), Sj, SjDj, cv::DFT_COMPLEX_OUTPUT, conjB);
     cv::accumulate(SjDj, P);   //equivalent to P += SjDj;
   }
-  TelescopeSettings tsettings(D_.front().cols);
-  P.setTo(0, Zernikes::phaseMapZernike(1, P.cols, tsettings.cutoffPixel()) == 0);
+  OpticalSetup tsettings(D_.front().cols);
+  P.setTo(0, BasisRepresentation::phaseMapZernike(1, P.cols, tsettings.cutoffPixel()) == 0);
 }
 
-void Metric::compute_dP(const cv::Mat& zernikeElement, const std::vector<OpticalSystem>& OS, const unsigned int& j, cv::Mat& dP)
+void Metric::compute_dP(const cv::Mat& zernikeElement, const std::vector<Optics>& OS, const unsigned int& j, cv::Mat& dP)
 {
   //Simply compute one element of the sum in dP
   cv::Mat dSj;
@@ -166,8 +168,8 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanP
   
   
   //To zero-out frequencies beyond cutoff
-  TelescopeSettings tsettings(D_.front().cols);
-  filter.setTo(0, Zernikes::phaseMapZernike(1, filter.cols, tsettings.cutoffPixel()) == 0);
+  OpticalSetup tsettings(D_.front().cols);
+  filter.setTo(0, BasisRepresentation::phaseMapZernike(1, filter.cols, tsettings.cutoffPixel()) == 0);
   
   //select only the central lobe of the filter when represented in the frequency domain
   // Find total markers
@@ -197,15 +199,10 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanP
 //Objective function : L = sum_i{ |y - Φ(x)|^2 }
 double Metric::objective( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise )
 {
-  if( zernikeBase_.empty() == true )
-  {
-    zernikeBase_ = Zernikes::zernikeBase(coeffs.total()/D_.size(), D_.front().size().width, pupilRadiousPxls_);
-  }
-  
   double L(0.0);
   //Intermal metrics
   cv::Mat P, Q, H;
-  std::vector<OpticalSystem> OS;
+  std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
   computeQ(coeffs, meanPowerNoise, OS, Q);
   computeP(coeffs, meanPowerNoise, OS, P);
@@ -249,16 +246,24 @@ double Metric::objective( const cv::Mat& coeffs, const std::vector<double>& mean
   return L;
 }
 
+void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, cv::Mat& De )
+{
+  std::vector<cv::Mat> De_v;
+  phi(coeffs, meanPowerNoise, De_v);
+  std::vector<cv::Mat> de_v;
+  for(auto Dei : De_v )
+  {
+    cv::Mat Dei_t( Dei.t() );
+    de_v.push_back(Dei_t.reshape(0, Dei_t.total() ));
+  }
+  cv::vconcat(de_v, De);
+}
+
 //Object estimate convoluted with OTFi for a given phase coefficient vector
 void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, std::vector<cv::Mat>& De )
 {
-  if( zernikeBase_.empty() == true )
-  {
-    zernikeBase_ = Zernikes::zernikeBase(coeffs.total()/D_.size(), D_.front().size().width, pupilRadiousPxls_);
-  }
-  
   cv::Mat P, Q, H, F;
-  std::vector<OpticalSystem> OS;
+  std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
   computeQ(coeffs, meanPowerNoise, OS, Q);
   computeP(coeffs, meanPowerNoise, OS, P);
@@ -280,16 +285,36 @@ void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoi
   }
 }
 
+void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, cv::Mat& jacob )
+{
+  std::vector<std::vector<cv::Mat> > jacob_v;
+  jacobian( coeffs, meanPowerNoise, jacob_v );
+  
+  std::vector<cv::Mat> blockMatrix;
+  std::vector<cv::Mat> res;
+  for(size_t j = 0; j < jacob_v.size(); ++j)
+  {
+    std::vector<cv::Mat> blockMatrixRow;
+    for(size_t m = 0; m < jacob_v.at(j).size(); ++m)
+    {
+      cv::Mat coo_t( jacob_v.at(j).at(m).t() );
+      blockMatrixRow.push_back(coo_t.reshape(0, coo_t.total() ));
+    }
+        
+    cv::Mat blockMatrixRow_M;
+    cv::hconcat(blockMatrixRow, blockMatrixRow_M);
+    blockMatrix.push_back(blockMatrixRow_M);
+  }
+  cv::Mat blockMatrix_M;
+  cv::vconcat(blockMatrix, jacob);
+}
+
+
 //Compute the jacobian of Φ in the equation: y = Φ(x) + e
 void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, std::vector<std::vector<cv::Mat> >& jacob )
 {
-  if( zernikeBase_.empty() == true )
-  {
-    zernikeBase_ = Zernikes::zernikeBase(coeffs.total()/D_.size(), D_.front().size().width, pupilRadiousPxls_);
-  }
-  
   cv::Mat P, Q, H, F;
-  std::vector<OpticalSystem> OS;
+  std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
   computeQ(coeffs, meanPowerNoise, OS, Q);
   computeP(coeffs, meanPowerNoise, OS, P);
@@ -341,7 +366,7 @@ void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPow
 
 
 //Computes derivative of OTF with respect to an element of the zernike base
-void Metric::compute_dSj(const OpticalSystem& osj, const cv::Mat& zernikeElement, cv::Mat& dSj)
+void Metric::compute_dSj(const Optics& osj, const cv::Mat& zernikeElement, cv::Mat& dSj)
 {
   cv::Mat Pj = osj.generalizedPupilFunction();
   cv::Mat ZH;
@@ -367,14 +392,9 @@ void Metric::compute_dSj(const OpticalSystem& osj, const cv::Mat& zernikeElement
 //gradient of the whole objective function: L = sum_i{ |D_i - F * S_i|^2 } with respect to every parameter of the phase
 cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise )
 {
-  if( zernikeBase_.empty() == true )
-  {
-    zernikeBase_ = Zernikes::zernikeBase(coeffs.total()/D_.size(), D_.front().size().width, pupilRadiousPxls_);
-  }
-  
   //Intermal metrics
   cv::Mat P, Q, H, F;
-  std::vector<OpticalSystem> OS;
+  std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
   computeP(coeffs, meanPowerNoise, OS, P);
   computeQ(coeffs, meanPowerNoise, OS, Q);
@@ -392,13 +412,13 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& mean
 
 
   for(size_t j = 0; j < J; ++j)
-  { 
+  {
     cv::Mat FDj;
     cv::mulSpectrums(F, D_.at(j), FDj, cv::DFT_COMPLEX_OUTPUT, conjB);
     cv::Mat Sj = OS.at(j).otf().clone();
     fftShift(Sj);
-    TelescopeSettings tsettings(D_.front().cols);
-    Sj.setTo(0, Zernikes::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
+    OpticalSetup tsettings(D_.front().cols);
+    Sj.setTo(0, BasisRepresentation::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
     
     cv::Mat abs2F, abs2FSj;
     cv::mulSpectrums(F, F, abs2F, cv::DFT_COMPLEX_OUTPUT, conjB);
@@ -408,7 +428,7 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& mean
     cv::Mat V = FDj - abs2FSj;
     
     for(size_t m = 0; m < M; ++m)
-    {      
+    {
       cv::Mat dSj, dSjV;
       compute_dSj(OS.at(j), zernikeBase_.at(m), dSj);
       cv::mulSpectrums(dSj, V, dSjV, cv::DFT_COMPLEX_OUTPUT);

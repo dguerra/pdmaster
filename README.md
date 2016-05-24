@@ -14,11 +14,11 @@ g++ -o hello -L/mnt/project/lib -I/mnt/project/include HelloWorld.cpp -lopencv_c
 gcc -o foo foo.c -L$(prefix)/lib -lfoo -Wl,-rpath=$(prefix)/lib
 
 
-Rules to build the entire project, first go to makefiles folder and then type:
+###Rules to build the entire project, first go to makefiles folder and then type:
 make -f makefile all
 
-To clean the objects before rebuild the project:
-make clean
+###To clean the objects before rebuild the project:
+make clean  
 
 
 

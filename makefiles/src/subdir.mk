@@ -4,72 +4,62 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 CPP_SRCS += \
-../EffectivePixel.cpp \
 ../FITS.cpp \
-../CompressedSensing.cpp \
-../SBL.cpp \
-../Curvelets.cpp \
+../SparseRecovery.cpp \
 ../ImageQualityMetric.cpp \
-../Minimization.cpp \
+../ConvexOptimization.cpp \
 ../Metric.cpp \
 ../NoiseEstimator.cpp \
 ../NoiseFilter.cpp \
-../OpticalSystem.cpp \
+../Optics.cpp \
 ../PDMain.cpp \
-../PDTools.cpp \
+../ToolBox.cpp \
 ../SubimageLayout.cpp \
-../TelescopeSettings.cpp \
+../OpticalSetup.cpp \
 ../TestRoom.cpp \
 ../WavefrontSensor.cpp \
-../Zernikes.cpp 
+../BasisRepresentation.cpp 
 
 OBJS += \
-./src/EffectivePixel.o \
 ./src/FITS.o \
-./src/CompressedSensing.o \
-./src/SBL.o \
-./src/Curvelets.o \
+./src/SparseRecovery.o \
 ./src/ImageQualityMetric.o \
-./src/Minimization.o \
+./src/ConvexOptimization.o \
 ./src/Metric.o \
 ./src/NoiseEstimator.o \
 ./src/NoiseFilter.o \
-./src/OpticalSystem.o \
+./src/Optics.o \
 ./src/PDMain.o \
-./src/PDTools.o \
+./src/ToolBox.o \
 ./src/SubimageLayout.o \
-./src/TelescopeSettings.o \
+./src/OpticalSetup.o \
 ./src/TestRoom.o \
 ./src/WavefrontSensor.o \
-./src/Zernikes.o 
+./src/BasisRepresentation.o 
 
 CPP_DEPS += \
-./src/EffectivePixel.d \
 ./src/FITS.d \
-./src/CompressedSensing.d \
-./src/SBL.d \
-./src/Curvelets.d \
+./src/SparseRecovery.d \
 ./src/ImageQualityMetric.d \
-./src/Minimization.d \
+./src/ConvexOptimization.d \
 ./src/Metric.d \
 ./src/NoiseEstimator.d \
 ./src/NoiseFilter.d \
-./src/OpticalSystem.d \
+./src/Optics.d \
 ./src/PDMain.d \
-./src/PDTools.d \
+./src/ToolBox.d \
 ./src/SubimageLayout.d \
-./src/TelescopeSettings.d \
+./src/OpticalSetup.d \
 ./src/TestRoom.d \
 ./src/WavefrontSensor.d \
-./src/Zernikes.d 
+./src/BasisRepresentation.d 
 
 
+# default: g++ -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<"
 # Each subdirectory must supply rules for building sources it contributes
 src/%.o: ../%.cpp
 	@echo 'Building file: $<'
 	@echo 'Invoking: GCC C++ Compiler'
-	g++ --param ggc-min-expand=0 --param ggc-min-heapsize=101072 -std=c++11 -fPIC -L../lib -I../include -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
+	g++ -ggdb3 -std=c++11 -L../lib -I../include -Wall -c -fmessage-length=0 -MMD -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
 	@echo 'Finished building: $<'
 	@echo ' '
-
-

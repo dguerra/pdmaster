@@ -11,20 +11,15 @@
 #include <cmath>
 #include <random>
 #include "TestRoom.h"
-#include "PDTools.h"
-#include "Zernikes.h"
+#include "ToolBox.h"
+#include "BasisRepresentation.h"
 #include "NoiseEstimator.h"
-#include "OpticalSystem.h"
+#include "Optics.h"
 #include "FITS.h"
-#include "CompressedSensing.h"
-#include "TelescopeSettings.h"
+#include "SparseRecovery.h"
+#include "OpticalSetup.h"
 #include "ImageQualityMetric.h"
-#include "Minimization.h"
-#include "curvelab/fdct_wrapping.hpp"
-#include "curvelab/fdct_wrapping_inline.hpp"
-#include "SBL.h"
-
-#include "Curvelets.h"
+#include "ConvexOptimization.h"
 
 
 //cv::randn(cv::Mat a, cv::Mat mean, cv::Mat std)
@@ -45,18 +40,35 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
   return A;
 }
 
+void test_SparseRecovery()
+{
+  double P_array[] = { -0.365062,   0.091490,   0.906873,  -0.880990,   0.346249,   0.249187,
+                       -0.909919,   0.380777,  -0.413275,   0.060092,   0.927514,   0.639146,
+                       -0.196918,   0.920130,  -0.082374,   0.469304,  -0.140821,  -0.727598 };
+  cv::Mat P(3, 6, cv::DataType<double>::type, P_array);
+
+  double s_array[] = {0.000000, 0.000000, -0.65563, 0.000000, 0.70438, 0.000000};
+  cv::Mat s(6, 1, cv::DataType<double>::type, s_array);
+  
+  cv::Mat_<double> x = P * s;
+  unsigned int sparsity = 2;
+  //cv::Mat sol = perform_IHT(P, x, sparsity, 0.0);
+  cv::Mat sol = perform_FISTA(P, x, 0.001);
+  std::cout << "sol: " << sol.t() << std::endl;
+}
+
 bool test_BSL()
 {
   unsigned int M = 80;          // row number of the dictionary matrix 
   unsigned int N = 164;          // column number
 
   unsigned int blkNum = 7;       // nonzero block number
-  unsigned int blkLen = 4;       // block length
+  unsigned int blkLen = 2;       // block length
 
   double SNR = 80;         // Signal-to-noise ratio
 
   cv::Mat Phi(M, N, cv::DataType<double>::type);
-  cv::randn(Phi, cv::Mat(1, 1, cv::DataType<double>::type, cv::Scalar(1.0)), cv::Mat::ones(1, 1, cv::DataType<double>::type));
+  cv::randn(Phi, cv::Scalar(1.0), cv::Scalar(1.0));
   cv::Mat PhiPhi, sumPhiPhi, sqrtsumPhiPhi;
   cv::multiply(Phi, Phi, PhiPhi);
   cv::reduce(PhiPhi, sumPhiPhi, 0, CV_REDUCE_SUM);   //sum every column a reduce matrix to a single row
@@ -95,28 +107,39 @@ bool test_BSL()
   
   cv::Mat nwgen = shuffleRows(wgen);
   cv::Mat xgen = nwgen.reshape(0, nwgen.total());
-  cv::Mat signal = Phi * xgen;   //noiseless signal
+  cv::Mat y = Phi * xgen;   //noiseless signal
   
   // Observation noise   
   cv::Scalar mean, stddev;
-  cv::meanStdDev(signal, mean, stddev);
-  cv::Mat noise(signal.size(), signal.type());
+  cv::meanStdDev(y, mean, stddev);
+  cv::Mat noise(y.size(), y.type());
   cv::randn(noise, cv::Scalar(0.0), cv::Scalar(stddev*std::pow(10,-SNR/20.0)));
-  // Noisy signal
-  cv::Mat y = signal + noise;
   
-  /*
-  double Phi_array[] = { 0.085418, -0.304933,  0.832896, 0.578306, -0.817437,  0.604256,
-                         0.976559, -0.417760, -0.499972, 0.782559,  0.096814, -0.025679,
-                        -0.197578,  0.855858, -0.237303, 0.230571, -0.567823,  0.796377 };
+  double Phi_array[] = { 0.889288,   0.727865,  -0.837231,  -0.246046,  -0.428118,  -0.812367,
+                         0.148014,   0.256824,  -0.401575,   0.066427,  -0.464477,  -0.573846,
+                         0.432734,   0.635809,  -0.371190,  -0.966979,   0.775227,   0.103731 };
+                         
   cv::Mat nPhi(3, 6, cv::DataType<double>::type, Phi_array);
-  double y_array[] = {0.0045347, 0.0034440, 0.0414892 };
+  double x_array[] = {0.00000, 0.00000,  0.00000,  0.00000, -1.68713, -1.40636};
+  cv::Mat nx(6, 1, cv::DataType<double>::type, x_array);
+  
+  double y_array[] = { 1.8648, 1.5907, -1.4538};
   cv::Mat ny(3, 1, cv::DataType<double>::type, y_array);
-  */
+  
   //OptAlg
-  cv::Mat res = BSBL::perform_BSBL(Phi, y, BSBL::NoiseLevel::Noisy, blkLen);
-  std::cout << "xgen: " << xgen.t() << std::endl;
-  std::cout << "res: " << res.t() << std::endl;
+  //cv::Mat res = perform_BSBL(nPhi, ny, NoiseLevel::Noiseless, blkLen);
+  //cv::Mat res2 = perform_IHT(nPhi, ny, 2);
+  std::vector<double> gamma_v(3, 1.0);
+  for(unsigned int i=0;i<1;++i)
+  {
+    //gamma_v = std::vector<double>(3, 1.0);
+    cv::Mat res = perform_BSBL(nPhi, nPhi*nx, NoiseLevel::Noiseless, gamma_v, 2);
+    //cv::Mat res2 = perform_IHT(nPhi, nPhi*(10e-4*nx), 2);
+    std::cout << "res: " << res.t() << std::endl;
+    //std::cout << "res2: " << res2.t() << std::endl;
+  }
+  
+
   return true;
 }
 
@@ -155,347 +178,10 @@ void test_nonlinearCompressedSensing()
 }
 */
 
-void test_fista()
-{
-  std::function<double(cv::Mat)> funcc = [] (cv::Mat x) -> double 
-  {//Eq to minimize: x1^8-3*(x1+3)^5+5+(x2+4)^6+x2^5+3*x3^2+x4^4
-    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
-           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5) + 3 * std::pow(x.at<double>(2,0),2) + 
-           std::pow(x.at<double>(3,0),4);
-           
-  };
-  
-  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat x) -> cv::Mat
-  { //Gradient vector function: function derivative with every variable
-    cv::Mat t(4,1, cv::DataType<double>::type);  //Size(3,1)->1 row, 2 colums
-    t.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
-                            std::pow(x.at<double>(0,0)+3,4);
-    
-    t.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
-                            std::pow(x.at<double>(1,0)+4,5);
-    t.at<double>(2,0) = 6 * x.at<double>(2,0);
-    t.at<double>(3,0) = 4 * std::pow(x.at<double>(3,0),3);
-    return t;
-  };
-  
-
-  double lambda = 1.0;
-  auto perform_soft_thresholding = [lambda](cv::Mat x, double tau)-> cv::Mat
-  {
-    //   Proximal operator for the scalar L1 norm.
-    //   y = prox_{tau*|.|_1}(x) = max(0,1-tau/|x|)*x
-    //y = max(0,1-tau./max(abs(x),1e-10)).*x;
-    return cv::max(0.0, 1.0 - (lambda*tau)/cv::abs(x)).mul(x);
-  };
-  
-  double L = 10.0;
-  //double L = 1.0;
-  cv::Mat x = cv::Mat::zeros(4, 1, cv::DataType<double>::type);
-  auto L1_norm = [lambda](cv::Mat x) -> double
-  {
-    return lambda * norm(x, cv::NORM_L1);
-  };
-  Minimization mm;
-  mm.perform_FISTA(x, L1_norm, funcc, perform_soft_thresholding, dfuncc, L); 
-}
-
-
-//fdct_wrapping_demo_denoise -- Image denoising using Curvelets
-bool test_curveletDemoDenoise()
-{
-  //See section 5.6.3 from book Sparse Image and Signal Processing - Starck
-  //Also examples from CurveLab software pack - Matlab code
-  
-  cv::Mat dat, img;
-  readFITS("../inputs/Lena.fits", dat);
-  dat.convertTo(img, cv::DataType<double>::type);
-  
-  
-  cv::Mat gauss_noise(img.size(), cv::DataType<double>::type);
-  double sigma_ = 20;
-  cv::Scalar sigma(sigma_), m_(0);
-  
-  cv::theRNG() = cv::RNG( time (0) );
-  cv::randn(gauss_noise, m_, sigma);
-  cv::Mat noisy_img;
-  cv::add(img, gauss_noise, noisy_img);
-  
-  writeFITS(noisy_img, "../noisy_img.fits");
-  writeFITS(img, "../img.fits");
-  
-  cv::Mat F = cv::Mat::ones(img.size(), img.type());
-  cv::Mat X;
-  //cv::idft(F, X, cv::DFT_COMPLEX_OUTPUT);
-  cv::dft(F, X, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(X);
-  std::vector<std::vector<cv::Mat> > C;   //Curvelets coeffs
-  
-  Curvelets::fdct(X, C, false);
-
-  int nb(0);
-  for(unsigned int s=0;s<C.size();++s)
-  {
-    for(unsigned int w=0;w<C.at(s).size();++w)
-    {
-      nb += C.at(s).at(w).total();
-    }
-  }
-  double E = double(img.cols)/std::sqrt(nb);
-  
-  Curvelets::fdct(noisy_img, C, true);
-  
-  std::vector<std::vector<cv::Mat> > Ct;
-  //Ct.push_back(C.at(0).at(0));
-  for(unsigned int s=0;s<C.size();++s)
-  {
-    double thresh = 4.0 * sigma_ + sigma_ * (s+1 == C.size() ? 1 : 0);
-    std::vector<cv::Mat> Ct_v;
-    for(unsigned int w=0;w<C.at(s).size();++w)
-    {
-      cv::Mat A;
-      C.at(s).at(w).copyTo(A);
-      if(s!=0) A.setTo(0.0, cv::abs(A) < thresh * E);
-      Ct_v.push_back(A);
-    }
-    Ct.push_back(Ct_v);
-  }
-
-  cv::Mat restored_img;
-  Curvelets::ifdct(Ct, restored_img, img.rows, img.cols, true);
-
-  writeFITS(splitComplex(restored_img).first,  "../restored_img.fits" );
-
-  cv::dft(restored_img, restored_img, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(restored_img);
-  writeFITS(absComplex(restored_img), "../res_out.fits");
-
-  return true;
-}
-
-bool test_LinearizedBregmanAlgorithmDenoising()
-{
-  cv::Mat dat, img;
-  readFITS("../inputs/Lena.fits", dat);
-  dat.convertTo(img, cv::DataType<double>::type);
-  cv::flip(img, img, -1);
-  cv::Mat gauss_noise(img.size(), cv::DataType<double>::type);
-  double sigma_ = 20;
-  cv::Scalar sigma(sigma_), m_(0);
-  
-  cv::theRNG() = cv::RNG( time (0) );
-  cv::randn(gauss_noise, m_, sigma);
-  cv::Mat noisy_img;
-  cv::add(img, gauss_noise, noisy_img);
-  std::vector<std::vector<cv::Mat> > C;   //Curvelets coeffs
-  Curvelets::fdct(noisy_img, C, true);
-  
-  auto shrink = [] (const std::vector<std::vector<cv::Mat> >& v, const double& mu)
-  {
-    for(unsigned int s=0; s<v.size(); ++s)
-    {
-      for(unsigned int w=0; w<v.at(s).size(); ++w)
-      {
-        cv::Mat u = cv::Mat::zeros(v.at(s).at(w).size(), v.at(s).at(w).type());
-        cv::Mat vPlusmu, vMinusmu;
-        cv::add(v.at(s).at(w), mu, vPlusmu);
-        cv::subtract(v.at(s).at(w), mu, vMinusmu);
-        vMinusmu.copyTo(u, v.at(s).at(w)>mu);
-        vPlusmu.copyTo(u, v.at(s).at(w)<-mu);
-        u.copyTo(v.at(s).at(w));
-      }
-    }
-  };
-  
-  std::vector<std::vector<cv::Mat> > v, u;
-  Curvelets::fdct(cv::Mat::zeros(noisy_img.size(), noisy_img.type()), v, true);
-  Curvelets::fdct(cv::Mat::zeros(noisy_img.size(), noisy_img.type()), u, true);
-  double epsilon(0.00001);
-  double conver(999999);
-  double mu(0.5), delta(0.1);
-  while(conver > epsilon)
-  {
-    cv::Mat Au;
-    std::vector<std::vector<cv::Mat> > At;
-    Curvelets::ifdct(u, Au, noisy_img.rows, noisy_img.cols, true);
-    cv::Mat d = noisy_img - Au;
-    Curvelets::fdct(d, At, true);
-    conver = cv::sum(cv::abs(d)).val[0];
-    for(unsigned int s=0; s<v.size(); ++s)
-    {
-      for(unsigned int w=0; w<v.at(s).size(); ++w)
-      {
-        v.at(s).at(w)= v.at(s).at(w) + At.at(s).at(w);
-      }
-    }
-  
-    shrink(v, mu);
-    for(unsigned int s=0; s<v.size(); ++s)
-    {
-      for(unsigned int w=0; w<v.at(s).size(); ++w)
-      {
-        u.at(s).at(w) = v.at(s).at(w).mul(delta);
-      }
-    }
-  }
-  
-  cv::Mat out;
-  Curvelets::ifdct(u, out, noisy_img.rows, noisy_img.cols, true);
-  writeFITS(splitComplex(out).first, "../out.fits");
-  return true;
-}
-
-bool test_simpleCurveletsRegularization()
-{
-  // See here: https://docs.google.com/document/d/1lAlX7BfVZT9RNaoEtQpjkysKbB--e4hXnS8UYAuv7rM/edit?usp=sharing
-  cv::Mat dat, img;
-  readFITS("../inputs/Lena.fits", dat);
-  dat.convertTo(img, cv::DataType<double>::type);
-  cv::flip(img, img, 0);
-  
-  cv::Mat gauss_noise_1(img.size(), cv::DataType<double>::type);
-  cv::Mat gauss_noise_2(img.size(), cv::DataType<double>::type);
-  double sigma_ = 20;
-  cv::Scalar sigma(sigma_), m_(0);
-  
-  cv::theRNG() = cv::RNG( time (0) );
-  cv::randn(gauss_noise_1, m_, sigma);
-  cv::randn(gauss_noise_2, m_, sigma);
-  cv::Scalar cnt(17.4);
-  
-  cv::Mat d1 = img.mul(cnt) + gauss_noise_1;
-  cv::Mat d2 = img.mul(cv::Scalar(3.0) + cnt) + gauss_noise_2;
-  std::cout << "hello" << std::endl;
-  
-  auto L = [d1, d2](const cv::Mat& a_) -> double 
-  { 
-    double a = a_.at<double>(0,0);
-    cv::Mat f;
-    cv::divide(d1.mul(2.0*a) + d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
-    cv::Mat res = (f.mul(a)-d1).mul(f.mul(a)-d1);// + (f.mul(3.0+a)-d2).mul(f.mul(3.0+a)-d2);
-    return cv::sum(res).val[0];
-  };
-  
-  auto dL = [d1, d2] (const cv::Mat& a_) -> cv::Mat
-  {
-    double a = a_.at<double>(0,0);
-    cv::Mat f;
-    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
-    cv::Mat res = (f.mul(a)-d1).mul(f.mul(2.0));// + ((3+a)*f-d2).mul(f.mul(2.0));
-    cv::Mat r = cv::Mat::zeros(1, 1, cv::DataType<std::complex<double> >::type);
-    r.at<std::complex<double> >(0, 0) = std::complex<double>(cv::sum(res).val[0], cv::sum(res).val[0]);
-    return r;
-  };
-  
-  auto curvelet_l1norm = [d1, d2] (const cv::Mat& a_) -> double
-  {
-    double a = a_.at<double>(0,0);
-    //d1 image into curvelets
-    std::vector<std::vector<cv::Mat> > C1;
-    Curvelets::fdct(d1, C1, true);
-  
-    //d2 image into curvelets
-    std::vector<std::vector<cv::Mat> > C2;
-    Curvelets::fdct(d2, C2, true);
-
-    cv::Mat f;
-    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
-    std::vector<std::vector<cv::Mat> > Cf;
-    Curvelets::fdct(f, Cf, true);
-    
-    double l1norm(0.0);
-    for(unsigned int w = 0; w < Cf.size(); ++w)
-    { 
-      for(unsigned int s = 0; s < Cf.at(w).size(); ++s)
-      {
-        double t1 = (2.0*a)/(2.0*a*a+2.0*(3.0+a)*(3.0+a));
-        double t2 = (2.0*(3.0+a))/(2.0*a*a+2.0*(3.0+a)*(3.0+a));
-
-        l1norm += cv::norm(C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), cv::NORM_L1);
-      }
-    }
-    //std::cout << "l1norm: " << l1norm << " vs Curvelets::l1_norm(Cf): " << Curvelets::l1_norm(Cf);
-    return Curvelets::l1_norm(Cf);
-  };
-  
-  auto dcurvelet_l1norm = [d1, d2] (const cv::Mat& a_) -> cv::Mat
-  {
-    cv::Mat g = cv::Mat::zeros(1, 1, cv::DataType<std::complex<double> >::type);
-    double a = a_.at<double>(0,0);
-    
-    //d1 image into curvelets
-    std::vector<std::vector<cv::Mat> > C1;
-    Curvelets::fdct(d1, C1, true);
-    //d2 image into curvelets
-    std::vector<std::vector<cv::Mat> > C2;
-    Curvelets::fdct(d2, C2, true);
-    
-    cv::Mat f;
-    cv::divide(d1.mul(2.0*a)+d2.mul(2.0*(3.0+a)), 2.0*a*a+2.0*(3.0+a)*(3.0+a), f);
-    std::vector<std::vector<cv::Mat> > Cf;
-    Curvelets::fdct(f, Cf, true);
-    
-    double low_subgradient, high_subgradient;
-    for(unsigned int w = 0; w < Cf.size(); ++w)
-    { 
-      for(unsigned int s = 0; s < Cf.at(w).size(); ++s)
-      {
-        Cf.at(w).at(s).setTo(0.0, Cf.at(w).at(s)<=0.00001);
-        double t1 = (9.0-2.0*a*a)/((2.0*a*a+6.0*a+9.0)*(2.0*a*a+6.0*a+9.0));
-        double t2 = -(2.0*a*a+12.0*a+9.0)/((2.0*a*a+6.0*a+9.0)*(2.0*a*a+6.0*a+9.0));
-        cv::Mat signCrvlts = cv::Mat::ones(Cf.at(w).at(s).size(), Cf.at(w).at(s).depth());
-        cv::Mat signCrvlts_ = cv::Mat::ones(Cf.at(w).at(s).size(), Cf.at(w).at(s).depth());
-        signCrvlts.setTo(-1.0, Cf.at(w).at(s)<0.0);
-        signCrvlts_.setTo(-1.0, Cf.at(w).at(s)<=0.0);
-
-        cv::Mat A, A_;
-        cv::multiply(signCrvlts , C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), A);  //"sign" function considers zero as positive sign
-        cv::multiply(signCrvlts_, C1.at(w).at(s).mul(t1) + C2.at(w).at(s).mul(t2), A_);  //"sign_" function considers zero as negative sign
-          
-        low_subgradient += cv::sum(cv::min(A, A_)).val[0];
-        high_subgradient += cv::sum(cv::max(A, A_)).val[0];
-        if(low_subgradient != high_subgradient) std::cout << "Non smooth point!" << std::endl;
-      }
-    }
-    g.at<std::complex<double> >(0, 0) = std::complex<double>(low_subgradient, high_subgradient);
-    
-    return g;
-  };
-  
-  cv::Mat p = cv::Mat::zeros(1, 1, cv::DataType<double>::type);
-  
-  cv::Mat Q2 = cv::Mat::eye(1, 1, cv::DataType<double>::type);
-  
-  Minimization minimizationKit;
-  
-  auto func = [L, curvelet_l1norm](const cv::Mat& a_) -> double 
-  {
-    return L(a_) + curvelet_l1norm(a_);
-  };
-  auto dfunc = [dL, dcurvelet_l1norm](const cv::Mat& a_) -> cv::Mat
-  {
-    return dL(a_) + dcurvelet_l1norm(a_);
-  };
-  for(unsigned int i = 0; i<80;++i )
-  {
-    cv::Mat aa = cv::Mat::zeros(1, 1, cv::DataType<double>::type);
-    aa.at<double>(0,0) = double(i) * 0.5;
-    //std::cout << double(i) * 0.5 << ", " << L(aa) << std::endl;
-    std::cout << double(i) * 0.5 << ", " << curvelet_l1norm(aa) << std::endl;
-  }
-  minimizationKit.minimize(p, Q2, L, dL);
-  std::cout << "mimumum: " << p.t() << std::endl;
-  cv::Mat f_;
-  double p_ = p.at<double>(0,0);
-  cv::divide(d1.mul(2.0*p_)+d2.mul(2.0*(3.0+p_)), 2.0*p_*p_+2.0*(3.0+p_)*(3.0+p_), f_);
-  //writeFITS(f_, "../obejct.fits");
-  //writeFITS(d1, "../d1.fits");
-  return true;
-}
-
 /*
-bool test_nonsmoothMinimization()
+bool test_nonsmoothConvexOptimization()
 {
-  Minimization mm;
+  ConvexOptimization mm;
   
   cv::Mat Q2 = cv::Mat::eye(2, 2, cv::DataType<double>::type);
 
@@ -585,58 +271,6 @@ bool test_nonsmoothMinimization()
 
 */
 
-bool test_singleCurvelet()
-{
-  int isize = 256;
-  cv::Mat complexI = cv::Mat::zeros(isize, isize, cv::DataType<double>::type);
-  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(complexI);
- 
-  std::vector< vector<cv::Mat> > c;
-  Curvelets crvlts;
-  crvlts.fdct(complexI, c);
-
-  int w = 6;
-  int s = 2;
-  int A = c.at(s).at(w).rows;
-  int B = c.at(s).at(w).cols;
-  
-  int a = std::ceil((A+1)/2);
-  int b = std::ceil((B+1)/2);
-  c.at(s).at(w).at<std::complex<double> >(a,b) = std::complex<double>(1.0,0.0);
-
-
-  cv::Mat complexO;
-  crvlts.ifdct(c, complexO, isize, isize);
-  
-  writeFITS(splitComplex(complexO).first, "../real_curv_out.fits");
- 
-  cv::dft(complexO, complexO, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  fftShift(complexO);
-  writeFITS(absComplex(complexO), "../curv_out.fits");
-  return true;
-}
-bool test_NORM_L1()
-{
-  cv::Mat m1 = cv::Mat::zeros(10, 10, cv::DataType<double>::type);
-  cv::Mat m2 = cv::Mat::ones(10, 10, cv::DataType<double>::type);
-  cv::Mat m3 = -2*cv::Mat::eye(10, 10, cv::DataType<double>::type);
-  std::vector<cv::Mat> v1;
-  v1.push_back(m1);
-  v1.push_back(m2);
-  
-  std::vector<cv::Mat> v2;
-  v2.push_back(m3);
-  
-  std::vector<std::vector<cv::Mat> > V;
-  V.push_back(v1);
-  V.push_back(v2);
-  
-  double res = Curvelets::l1_norm(V);
-  std::cout << "res: " << res << std::endl;
-  return true;
-}
-
 bool test_convolveDFT_vs_crosscorrelation()
 {
   bool full(true), corr(true);
@@ -659,41 +293,6 @@ bool test_convolveDFT_vs_crosscorrelation()
   return true;
 }
 
-bool test_curveLab()
-{
-  int isize = 256;
-  cv::Mat img;
-  cv::Mat dat;
-  readFITS("../inputs/surfi000.fits", dat);
-  dat.convertTo(img, cv::DataType<double>::type);
-
-  int X(0),Y(0);
-  cv::Rect rect1(X, Y, isize, isize);
-    
-  img = img(rect1).clone();
-  cv::normalize(img, img, 0, 1, CV_MINMAX);
-  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
-  //writeFITS(img, "../curv_in.fits");
-  cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
-  cv::Mat complexI;
-  cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
-  //cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
-  //fftShift(complexI);
-
-  std::vector< std::vector<cv::Mat> > c;  //Wrapper class
-
-  Curvelets crvlts;
-  crvlts.fdct(complexI, c);
-
-  cv::Mat complexO;
-  crvlts.ifdct(c, complexO, isize, isize);
-
-  //std::cout << "accuracy of conversion: " << cv::norm(complexI - complexO, cv::NORM_L2)/complexO.total() << std::endl;
-  //writeFITS(splitComplex(complexO).first, "../curv_out_first.fits");
-  //writeFITS(splitComplex(complexO).second, "../curv_out_second.fits");
-
-  return true;
-}
 /*
 void test_udwd_spectrums()
 {
@@ -737,7 +336,7 @@ void test_udwd_spectrums()
 bool test_minimization()
 {
  
-  Minimization mm;
+  ConvexOptimization mm;
   
   //write in wolfram alpha the following to verify: "minimize{x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z^2} in x+2*y+3*z=0"
      
@@ -801,9 +400,9 @@ void test_generizedPupilFunctionVsOTF()
   double diversityFactor_ = -2.21209;
   constexpr double PI = 2*acos(0.0);
   double c4 = diversityFactor_ * PI/(2.0*std::sqrt(3.0));
-  cv::Mat z4 = Zernikes::phaseMapZernike(4, 128, 50);
+  cv::Mat z4 = BasisRepresentation::phaseMapZernike(4, 128, 50);
   double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
-  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, 128, 50);
+  cv::Mat pupilAmplitude = BasisRepresentation::phaseMapZernike(1, 128, 50);
   cv::Mat c = cv::Mat::zeros(14, 1, cv::DataType<double>::type);
   c.at<double>(0,3) = 0.8;
   c.at<double>(0,4) = 0.3;
@@ -816,17 +415,17 @@ void test_generizedPupilFunctionVsOTF()
   c1.at<double>(0,6) = 0.9;
   c1.at<double>(0,10) = 0.42;
 
-  cv::Mat focusedPupilPhase = Zernikes::phaseMapZernikeSum(128, 50, c);
-  cv::Mat focusedPupilPhase1 = Zernikes::phaseMapZernikeSum(128, 50, c1);
+  cv::Mat focusedPupilPhase = BasisRepresentation::phaseMapZernikeSum(128, 50, c);
+  cv::Mat focusedPupilPhase1 = BasisRepresentation::phaseMapZernikeSum(128, 50, c1);
 
   cv::Mat defocusedPupilPhase = focusedPupilPhase + c4*(z4-z4AtOrigen);
   cv::Mat defocusedPupilPhase1 = focusedPupilPhase1 + c4*(z4-z4AtOrigen);
 
 
-  OpticalSystem focusedOS(focusedPupilPhase, pupilAmplitude);
-  OpticalSystem focusedOS1(focusedPupilPhase1, pupilAmplitude);
-  OpticalSystem defocusedOS(defocusedPupilPhase, pupilAmplitude);
-  OpticalSystem defocusedOS1(defocusedPupilPhase1, pupilAmplitude);
+  Optics focusedOS(focusedPupilPhase, pupilAmplitude);
+  Optics focusedOS1(focusedPupilPhase1, pupilAmplitude);
+  Optics defocusedOS(defocusedPupilPhase, pupilAmplitude);
+  Optics defocusedOS1(defocusedPupilPhase1, pupilAmplitude);
   //cv::Mat result = divComplex(focusedOS.otf(),defocusedOS.otf());
   cv::Mat result = focusedOS.generalizedPupilFunction()-defocusedOS.generalizedPupilFunction();
   cv::Mat result1 = focusedOS1.generalizedPupilFunction()-defocusedOS1.generalizedPupilFunction();
@@ -854,7 +453,7 @@ void test_wavelet_zernikes_decomposition()
 void test_zernike_wavelets_decomposition()
 {
   std::vector<cv::Mat> vCat;
-  std::map<unsigned int, cv::Mat> cat = Zernikes::buildCatalog(20, 200, 200/2);
+  std::map<unsigned int, cv::Mat> cat = BasisRepresentation::buildCatalog(20, 200, 200/2);
   std::vector<cv::Mat> wavelet_planes;
   cv::Mat residu;
   unsigned int count(0);
@@ -1008,7 +607,7 @@ void test_divComplex()
 bool test_zernikes()
 {
 
-  cv::Mat mask = Zernikes::phaseMapZernike(1,128*8,128*4);
+  cv::Mat mask = BasisRepresentation::phaseMapZernike(1,128*8,128*4);
   cv::imshow("mask",mask);
   cv::waitKey();
   cv::imwrite("mask.ppm",mask);
@@ -1023,12 +622,12 @@ void test_phaseMapZernikeSum()
   int n = sizeof(data) / sizeof(data[0]);
   cv::Mat coeffs(n, 1, CV_64FC1, data);
   std::cout << "coeffs: " << coeffs << std::endl;
-  cv::Mat phaseMapSum = Zernikes::phaseMapZernikeSum(136/2, 32.5019, coeffs);
+  cv::Mat phaseMapSum = BasisRepresentation::phaseMapZernikeSum(136/2, 32.5019, coeffs);
   std::cout << "phaseMapSum.at<double>(30,30): " << phaseMapSum.at<double>(40,40) << std::endl;
 
   for(unsigned int i=4;i<=10;++i)
   {
-    cv::Mat zern = Zernikes::phaseMapZernike(i, 136/2, 32.5019);
+    cv::Mat zern = BasisRepresentation::phaseMapZernike(i, 136/2, 32.5019);
     cv::normalize(zern, zern, 0, 1, CV_MINMAX);
     writeOnImage(zern, std::to_string(i));
     cv::imshow(std::to_string(i), zern);
@@ -1063,13 +662,13 @@ bool test_normalization()
   return true;
 }
 
-void test_OpticalSystem()
+void test_Optics()
 {
   unsigned char data[8][8] = {1,2,3,4,5,4,3,2,   2,3,4,5,6,5,4,3,   3,4,5,6,7,6,5,4,   2,3,4,5,6,5,4,3,
                                 1,2,3,4,5,4,3,2,   2,3,4,5,6,5,4,3,   3,4,5,6,7,6,5,4,   2,3,4,5,6,5,4,3};
   cv::Mat p(8, 8, CV_8UC1, data);
   cv::Mat a = cv::Mat::ones(p.size(), p.type());
-  OpticalSystem os = OpticalSystem(cv::Mat_<float>(p),cv::Mat_<float>(a));
+  Optics os = Optics(cv::Mat_<float>(p),cv::Mat_<float>(a));
 
   std::cout << "otf():" << std::endl;
   std::cout << os.otf() << std::endl;
@@ -1106,7 +705,7 @@ void test_getNM()
   int M;
   for(unsigned int j=1; j<=10; ++j)
   {
-    Zernikes::getNM(j,N,M);
+    BasisRepresentation::getNM(j,N,M);
     std::cout << "Zernike Index: " << j << "; N: " << N << "; M: " << M << std::endl;
   }
 }
@@ -1162,8 +761,8 @@ void test_ErrorMetric()
   cv::Mat amp = cv::Mat::ones(pa.size(), pa.type());
   cv::Mat pb;
   cv::flip(pa,pb,-1);
-  OpticalSystem focusedOS = OpticalSystem(cv::Mat_<float>(pa),cv::Mat_<float>(amp));
-  OpticalSystem defocusedOS = OpticalSystem(cv::Mat_<float>(pb),cv::Mat_<float>(amp));
+  Optics focusedOS = Optics(cv::Mat_<float>(pa),cv::Mat_<float>(amp));
+  Optics defocusedOS = Optics(cv::Mat_<float>(pb),cv::Mat_<float>(amp));
 
 
   cv::Mat absT0 = absComplex(focusedOS.otf());

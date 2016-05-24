@@ -48,7 +48,7 @@ cv::Mat SubimageLayout::atmospheric_zernike_coeffs(const unsigned int& z_max, co
   cv::Mat_<double> b(z_max - nl + 1, 1);
   cv::Mat sqrt_eigenvalues;
   cv::sqrt(eigenvalues, sqrt_eigenvalues);
-  std::cout << "sqrt_eigenvalues: " << sqrt_eigenvalues.t() << std::endl;
+  //std::cout << "sqrt_eigenvalues: " << sqrt_eigenvalues.t() << std::endl;
   cv::theRNG() = cv::RNG( cv::getTickCount() );
   cv::randn(b, 0.0, 1.0);
   cv::Mat z_coeffs = eigenvectors.t() * b.mul(sqrt_eigenvalues *  std::pow( D / r0, 5.0 / 6.0));
@@ -104,7 +104,7 @@ void SubimageLayout::computerGeneratedImage()
   */
   
   //high Sparsity case:
-  double data1[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.79, 0.0, 0.0, 0.0, 0.0, 0.0, 0.54, 0.0, 0.0 };
+  double data1[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.79, 0.0, 0.0, 0.0, 0.0, 0.0, 0.54, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
   double data2[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.78, 0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 0.0, 0.0 };
   double data3[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.77, 0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 0.0, 0.0 };
   double data4[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.77, 0.0, 0.0, 0.0, 0.0, 0.0, 0.54, 0.0, 0.0 };
@@ -120,11 +120,14 @@ void SubimageLayout::computerGeneratedImage()
   */
   //std::cout << "atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0): " << atmospheric_zernike_coeffs(200, 1.0, 1.0).t() << std::endl;
   double fc = 1.0;
-  unsigned int max_zernike(50);
+  unsigned int max_zernike(20);
+  //cv::Mat coeffs1(max_zernike, 1, cv::DataType<double>::type, data1);
   cv::Mat coeffs1 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
   cv::Mat coeffs2 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
   cv::Mat coeffs3 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
   cv::Mat coeffs4 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
+  
+  
   
   std::cout << "coeffs1: " << coeffs1.t() << std::endl;
   std::cout << "coeffs2: " << coeffs2.t() << std::endl;
@@ -144,16 +147,17 @@ void SubimageLayout::computerGeneratedImage()
   cv::Mat d2 = cv::Mat::zeros(img.size(), img.type());
   
   OpticalSetup ts(tileSize);
-  double sigma_noise(0.01);
+  double sigma_noise(0.0);
 
   for(unsigned int i=0;i<img_v.size(); ++i)
   {
     cv::Mat tile1, tile2;
     std::pair<cv::Range, cv::Range> rng = rng_v.at(i);
-    cv::Mat pupilPhase = BasisRepresentation::phaseMapZernikeSum(img_v.at(i).cols, ts.pupilRadiousPixels(), coeffs_v.at(i));
+    double cte = 1.0;
+    cv::Mat pupilPhase = cte* BasisRepresentation::phaseMapZernikeSum(img_v.at(i).cols, ts.pupilRadiousPixels(), coeffs_v.at(i));
     aberrate(img_v.at(i), pupilPhase, ts.pupilRadiousPixels(),  sigma_noise, tile1 );
 
-    cv::Mat diversityPhase = (ts.k() * 3.141592/(2.0*std::sqrt(3.0))) * BasisRepresentation::phaseMapZernike(4, img_v.at(i).cols, ts.pupilRadiousPixels(), false);
+    cv::Mat diversityPhase = (ts.k() * 3.141592/(2.0*std::sqrt(3.0))) * cte * BasisRepresentation::phaseMapZernike(4, img_v.at(i).cols, ts.pupilRadiousPixels(), false);
     aberrate(img_v.at(i), pupilPhase + diversityPhase, ts.pupilRadiousPixels(), sigma_noise, tile2 );
     tile1.copyTo( d1(rng.first, rng.second) );
     tile2.copyTo( d2(rng.first, rng.second) );

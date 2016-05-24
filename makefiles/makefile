@@ -41,7 +41,7 @@ endif
 all: PDMain
 
 # Tool invocations
-PDMain: $(OBJS) $(USER_OBJS)
+build: $(OBJS) $(USER_OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: GCC C++ Linker'
 	g++ -o PDMain -L../lib -I../include -Wl,-rpath=../lib $(OBJS) $(USER_OBJS) $(LIBS)
@@ -49,6 +49,13 @@ PDMain: $(OBJS) $(USER_OBJS)
 	@echo ' '
 
 # Other Targets
+debug: $(OBJS) $(USER_OBJS)
+	@echo 'Building target debug: $@'
+	@echo 'Invoking: GCC C++ Linker'
+	g++ -ggdb3 -o PDMain -L../lib -I../include -Wl,-rpath=../lib $(OBJS) $(USER_OBJS) $(LIBS)
+	@echo 'Finished building target: $@'
+	@echo ' '
+
 clean:
 	-$(RM) $(OBJS)$(C++_DEPS)$(C_DEPS)$(CC_DEPS)$(LIBRARIES)$(CPP_DEPS)$(CXX_DEPS)$(C_UPPER_DEPS) PDMain
 	-@echo ' '

@@ -9,7 +9,7 @@
 #define NOISEFILTER_H_
 
 #include <iostream>
-#include "OpticalSystem.h"
+#include "Optics.h"
 
 class NoiseFilter
 {
