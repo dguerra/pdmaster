@@ -8,19 +8,18 @@
 #include "SubimageLayout.h"
 #include "WavefrontSensor.h"
 #include "NoiseEstimator.h"
-#include "OpticalSystem.h"
+#include "Optics.h"
 #include "FITS.h"
-#include "Zernikes.h"
-#include "TelescopeSettings.h"
+#include "BasisRepresentation.h"
+#include "OpticalSetup.h"
 #include "ImageQualityMetric.h"
-#include "PDTools.h"
+#include "ToolBox.h"
+//Rename as ImageSimulator o ImageFormation o ImageDispatcher
+
 
 SubimageLayout::SubimageLayout()
 {
-  subimageSize_ = 42; //70; //56; //size of the box to be analized
-  subimageStepXSize_ = 0;
-  subimageStepYSize_ = 0;
-  apodizationPercent_ = 12.5;
+
 }
 
 SubimageLayout::~SubimageLayout()
@@ -28,64 +27,139 @@ SubimageLayout::~SubimageLayout()
   // TODO Auto-generated destructor stub
 }
 
+cv::Mat SubimageLayout::atmospheric_zernike_coeffs(const unsigned int& z_max, const double& D, const double& r0)
+{
+  //Build zernike covariance matrix
+  //unsigned int nl(2);   //First zernike order to start with: nl = 2 means do not consider piston
+  unsigned int nl(4);     //First zernike order to start with: nl = 4 means do not consider piston and tip/tilt
+  cv::Mat_<double> zc(z_max - nl + 1, z_max - nl + 1);
+  
+  for(unsigned int i = nl; i <= z_max; ++i)
+  {
+    for(unsigned int j = i; j <= z_max; ++j)
+    {
+      zc.at<double>(i - nl, j - nl) = BasisRepresentation::zernike_covar(i, j);
+    }
+  }
+  cv::completeSymm(zc);
+  cv::Mat eigenvalues, eigenvectors;
+  cv::eigen(zc, eigenvalues, eigenvectors);
+  
+  cv::Mat_<double> b(z_max - nl + 1, 1);
+  cv::Mat sqrt_eigenvalues;
+  cv::sqrt(eigenvalues, sqrt_eigenvalues);
+  std::cout << "sqrt_eigenvalues: " << sqrt_eigenvalues.t() << std::endl;
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
+  cv::randn(b, 0.0, 1.0);
+  cv::Mat z_coeffs = eigenvectors.t() * b.mul(sqrt_eigenvalues *  std::pow( D / r0, 5.0 / 6.0));
+  //Add zernike order that haven't been considered in the covariance matrix (piston)
+  cv::copyMakeBorder( z_coeffs, z_coeffs, nl - 1, 0, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0.0) );
+  
+  return z_coeffs;
+}
 
+void SubimageLayout::realData()
+{
+  cv::Mat img_f, dat_f;
+  readFITS("../inputs/sfoc.fits", dat_f);
+  dat_f.convertTo(img_f, cv::DataType<double>::type);
+  cv::normalize(img_f, img_f, 0, 1, CV_MINMAX);
+  //writeFITS(img_f, "../img_f.fits");
+  
+  cv::Mat img_d, dat_d;
+  readFITS("../inputs/sout.fits", dat_d);
+  dat_d.convertTo(img_d, cv::DataType<double>::type);
+  cv::normalize(img_d, img_d, 0, 1, CV_MINMAX);
+  //writeFITS(img_d, "../img_d.fits");
+ 
+  WavefrontSensor wSensor;
+  std::vector<cv::Mat> d = {img_f, img_d};
+  
+  NoiseEstimator noiseFocused, noiseDefocused;
+  noiseFocused.meanPowerSpectrum(img_f);
+  noiseDefocused.meanPowerSpectrum(img_d);
+  
+  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
+  cv::Mat object = wSensor.WavefrontSensing(d, meanPowerNoise); 
+}
+
+//Rename as simulation image
 void SubimageLayout::computerGeneratedImage()
 {
   //Benchmark
-  int isize = 42; //16; //22; //42; //32; //128; //42;
-  cv::Mat img;
-  if(true)
-  {
-    cv::Mat dat;
-    readFITS("../inputs/surfi000.fits", dat);
-    dat.convertTo(img, cv::DataType<double>::type);
+  cv::Mat img, dat;
+  readFITS("../inputs/surfi000.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+  cv::normalize(img, img, 0.0, 1.0, CV_MINMAX);
+  //writeFITS(img, "../img.fits");
+  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
 
-    int X(100),Y(100);  //Select a point in the image to find the aberration at
-    cv::Rect rect1(X-(isize/2), Y-(isize/2), isize, isize);   //Draw a rectangle centered at that point
-    
-    img = img(rect1).clone();
-    cv::normalize(img, img, 0, 1, CV_MINMAX);
-    //writeFITS(img, "../img.fits");
-    std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
-  }
+  //int M = 14;
   
-    /*
-  for (int r = 0; r < img.rows; r += N)
-  {
-    for (int c = 0; c < img.cols; c += N)
-    {
-        cv::Mat tile = img(cv::Range(r, min(r + N, img.rows)),
-                     cv::Range(c, min(c + N, img.cols)));//no data copying here
-        //cv::Mat tileCopy = img(cv::Range(r, min(r + N, img.rows)),
-                     //cv::Range(c, min(c + N, img.cols))).clone();//with data copying
-
-        //tile can be smaller than NxN if image size is not a factor of N
-        your_function_processTile(tile);
-    }
-  }
+  /*
+  double data1[] =   { 0.0, 0.0, 0.0, 0.33, 0.21, 0.79, 0.22, 0.44, 0.26, 0.59, 0.79, 0.54, 0.12, 0.99}; 
+  double data2[] =   { 0.0, 0.0, 0.0, 0.34, 0.22, 0.78, 0.23, 0.45, 0.24, 0.58, 0.79, 0.55, 0.12, 0.99}; 
+  double data3[] =   { 0.0, 0.0, 0.0, 0.35, 0.23, 0.77, 0.21, 0.46, 0.24, 0.58, 0.77, 0.55, 0.12, 0.98}; 
+  double data4[] =   { 0.0, 0.0, 0.0, 0.34, 0.21, 0.77, 0.22, 0.46, 0.25, 0.57, 0.78, 0.54, 0.11, 0.98}; 
   */
-
-  int M = 14;
-  TelescopeSettings ts(img.cols);
-  //double data[] = { 0.0, 0.0, 0.0, 0.0, 0.21, 0.22, 0.0, 0.0, 0.0, 0.0, 0.75, 0.74, 0.0, 0.0 };
-  //double data[] = { 0.0, 0.0, 0.0, 0.3, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-  double data[] =   { 0.0, 0.0, 0.0, 0.3, 0.2, 0.7, 0.2, 0.4, 0.2, 0.5, 0.7, 0.5, 0.1, 0.9}; // 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-  cv::Mat coeffs(M, 1, cv::DataType<double>::type, data);
-  cv::Mat d1, d2;
-  double sigma_noise = 0.0;
-  aberrate(img, coeffs, ts.pupilRadiousPixels(), 0.0,    sigma_noise, d1);
-  aberrate(img, coeffs, ts.pupilRadiousPixels(), ts.k(), sigma_noise, d2);
-
-  ImageQualityMetric iqm;
-  cv::Mat d1_n;
-  cv::normalize(d1, d1_n, 0, 1, CV_MINMAX);
-  cv::Scalar mssimd1 = iqm.mssim(img, d1_n);
-  std::cout << "MSSIM d1: " << mssimd1.val[0] << std::endl;
   
-  cv::Mat d2_n;
-  cv::normalize(d2, d2_n, 0, 1, CV_MINMAX);
-  cv::Scalar mssimd2 = iqm.mssim(img, d2_n);
-  std::cout << "MSSIM d2: " << mssimd2.val[0] << std::endl;
+  //high Sparsity case:
+  double data1[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.79, 0.0, 0.0, 0.0, 0.0, 0.0, 0.54, 0.0, 0.0 };
+  double data2[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.78, 0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 0.0, 0.0 };
+  double data3[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.77, 0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 0.0, 0.0 };
+  double data4[] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.77, 0.0, 0.0, 0.0, 0.0, 0.0, 0.54, 0.0, 0.0 };
+  
+  //enum class Dataset = {RealDataImage, AtmosphericTurbulence, RandomSparseCoeffs};
+  
+  
+  /*
+  cv::Mat coeffs1(M, 1, cv::DataType<double>::type, data1);
+  cv::Mat coeffs2(M, 1, cv::DataType<double>::type, data2);
+  cv::Mat coeffs3(M, 1, cv::DataType<double>::type, data3);
+  cv::Mat coeffs4(M, 1, cv::DataType<double>::type, data4);
+  */
+  //std::cout << "atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0): " << atmospheric_zernike_coeffs(200, 1.0, 1.0).t() << std::endl;
+  double fc = 1.0;
+  unsigned int max_zernike(50);
+  cv::Mat coeffs1 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
+  cv::Mat coeffs2 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
+  cv::Mat coeffs3 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
+  cv::Mat coeffs4 = fc * atmospheric_zernike_coeffs(max_zernike, 1.0, 1.0);
+  
+  std::cout << "coeffs1: " << coeffs1.t() << std::endl;
+  std::cout << "coeffs2: " << coeffs2.t() << std::endl;
+  std::cout << "coeffs3: " << coeffs3.t() << std::endl;
+  std::cout << "coeffs4: " << coeffs4.t() << std::endl;
+  
+  std::vector<cv::Mat> coeffs_v = {coeffs1, coeffs2, coeffs3, coeffs4};
+  unsigned int pixelsBetweenTiles = (int)(img.cols);
+  int tileSize = 34;
+  std::vector<cv::Mat> img_v;
+  std::vector<std::pair<cv::Range, cv::Range> > rng_v;
+  divideIntoTiles(img.size(), pixelsBetweenTiles, tileSize, rng_v);
+  for(auto rng_i : rng_v) img_v.push_back( img(rng_i.first, rng_i.second).clone() );
+  
+  
+  cv::Mat d1 = cv::Mat::zeros(img.size(), img.type());
+  cv::Mat d2 = cv::Mat::zeros(img.size(), img.type());
+  
+  OpticalSetup ts(tileSize);
+  double sigma_noise(0.01);
+
+  for(unsigned int i=0;i<img_v.size(); ++i)
+  {
+    cv::Mat tile1, tile2;
+    std::pair<cv::Range, cv::Range> rng = rng_v.at(i);
+    cv::Mat pupilPhase = BasisRepresentation::phaseMapZernikeSum(img_v.at(i).cols, ts.pupilRadiousPixels(), coeffs_v.at(i));
+    aberrate(img_v.at(i), pupilPhase, ts.pupilRadiousPixels(),  sigma_noise, tile1 );
+
+    cv::Mat diversityPhase = (ts.k() * 3.141592/(2.0*std::sqrt(3.0))) * BasisRepresentation::phaseMapZernike(4, img_v.at(i).cols, ts.pupilRadiousPixels(), false);
+    aberrate(img_v.at(i), pupilPhase + diversityPhase, ts.pupilRadiousPixels(), sigma_noise, tile2 );
+    tile1.copyTo( d1(rng.first, rng.second) );
+    tile2.copyTo( d2(rng.first, rng.second) );
+    
+  }
+  //writeFITS(d2, "../tile2.fits");
   
   WavefrontSensor wSensor;
   std::vector<cv::Mat> d = {d1, d2};
@@ -95,18 +169,12 @@ void SubimageLayout::computerGeneratedImage()
   noiseDefocused.meanPowerSpectrum(d2);
   
   //double meanPower = (sigma.val[0]*sigma.val[0])/d1.total();
-  std::vector<double> meanPowerNoise = {0.0, 0.0}; //{noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
+  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{meanPower, meanPower};   //supposed same noise in both images
+  //std::vector<double> meanPowerNoise = {0.0, 0.0};
   cv::Mat object = wSensor.WavefrontSensing(d, meanPowerNoise);
-  fftShift(object);
-  cv::idft(object, object, cv::DFT_REAL_OUTPUT);
-  cv::normalize(object, object, 0, 1, CV_MINMAX);
- 
-  cv::Scalar mssimIndex = iqm.mssim(img, object);
-  std::cout << "MSSIM obj: " << mssimIndex.val[0] << std::endl;
-
 }
 
-void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs, const double& pupilRadious, const double& diversity, const double& sigmaNoise, cv::Mat& aberratedImage)
+void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberrationPhase, const double& pupilRadious, const double& sigmaNoise, cv::Mat& aberratedImage)
 {
 
   cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
@@ -118,14 +186,9 @@ void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs
 
   double pupilSideLength = img.cols;
 
-  cv::Mat pupilAmplitude = Zernikes::phaseMapZernike(1, pupilSideLength, pupilRadious);
-  
-  cv::Mat z4 = Zernikes::phaseMapZernike(4, pupilSideLength, pupilRadious);
-  double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
-  cv::Mat diversityPhase = (diversity * 3.141592/(2.0*std::sqrt(3.0))) * (z4 - z4AtOrigen);
-
-  cv::Mat pupilPhase = Zernikes::phaseMapZernikeSum(pupilSideLength, pupilRadious, aberationCoeffs);
-  OpticalSystem OS = OpticalSystem(pupilPhase + diversityPhase, pupilAmplitude);  //Characterized optical system
+//  cv::Mat diversityPhase = (diversity * 3.141592/(2.0*std::sqrt(3.0))) * BasisRepresentation::phaseMapZernike(4, pupilSideLength, pupilRadious, false);
+//  cv::Mat pupilPhase = BasisRepresentation::phaseMapZernikeSum(pupilSideLength, pupilRadious, aberationCoeffs);
+  Optics OS = Optics(aberrationPhase, BasisRepresentation::circular_mask(pupilRadious, pupilSideLength) );  //Characterized optical system
 
   cv::Mat otf = OS.otf();
   fftShift(otf);
@@ -144,63 +207,6 @@ void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberationCoeffs
   cv::add(aberratedImage, noise, aberratedImage);
 }
 
-
-void SubimageLayout::navigateThrough()
-{
-  //Real dataset
-  //nextSubimage()
-  //The following actions should be done by the class in every sub-image
-  cv::Mat dat1, dat2, img1, img2;
-  readFITS("../inputs/sfoc.fits", dat1);
-  readFITS("../inputs/sout.fits", dat2);
-  dat1.convertTo(img1, cv::DataType<double>::type);
-  dat2.convertTo(img2, cv::DataType<double>::type);
-
-  std::cout << "cols: " << img1.cols << " x " << "rows: " << img1.rows << std::endl;
-
-  long upperTopCorner = 26;
-  subimageSize_ = 42; //70; //56; //size of the box to be analized
-  cv::Rect rect(upperTopCorner, upperTopCorner, subimageSize_, subimageSize_);
-
-  NoiseEstimator noiseFocused, noiseDefocused;
-  noiseFocused.meanPowerSpectrum(img1);
-  noiseDefocused.meanPowerSpectrum(img2);
-  
-  cv::Mat d0 = img1(rect).clone();
-  cv::Mat dk = img2(rect).clone(); 
-  //writeFITS(d0, "../d0.fits");
-  //writeFITS(dk, "../dk.fits");
-  //cv::normalize(d0, d0);
-  //cv::normalize(dk, dk);
-  std::cout << "cv::mean(d0): " << cv::mean(d0).val[0] << std::endl;
-  std::cout << "cv::mean(dk): " << cv::mean(dk).val[0] << std::endl;
-  //d0 = d0-cv::mean(d0);
-  //dk = dk-cv::mean(dk);
-  //cv::normalize(d0, d0, 0, 1, CV_MINMAX);
-  //cv::normalize(dk, dk, 0, 1, CV_MINMAX);
-  
-  std::cout << "noiseDefocused.sigma(): " << noiseDefocused.sigma() << std::endl;
-  std::cout << "noiseFocused.sigma(): " << noiseFocused.sigma() << std::endl;
-
-  //create apodization window and substract constant to have zero mean in the apodized image
-  cv::Mat apodizationWindow;
-  createModifiedHanningWindow(apodizationWindow, d0.cols, apodizationPercent_, cv::DataType<double>::type);
-  cv::Scalar imageD0Offset = cv::sum(d0.mul(apodizationWindow))/cv::sum(apodizationWindow);
-  cv::Scalar imageDkOffset = cv::sum(dk.mul(apodizationWindow))/cv::sum(apodizationWindow);
-
-  WavefrontSensor wSensor;
-  //std::vector<cv::Mat> d = {(d0-imageD0Offset).mul(apodizationWindow), (dk-imageDkOffset).mul(apodizationWindow)};
-  std::vector<cv::Mat> d = {d0, dk};
-  double sigma_d0 = ( cv::mean(d0).val[0] / 100.0 ) * 0.38;
-  double sigma_dk = ( cv::mean(dk).val[0] / 100.0 ) * 0.33;
-  std::cout << "sigma_d0: " << sigma_d0 << "; " << "sigma_dk: " << sigma_dk << std::endl;
-  // {0.3, 0.4};
-  std::vector<double> meanPowerNoise = {noiseFocused.meanPower(), noiseDefocused.meanPower()}; //{sigma_d0*sigma_d0/d0.total(), sigma_dk*sigma_dk/dk.total()};
-
-  cv::Mat phaseResult = wSensor.WavefrontSensing(d, meanPowerNoise);
-}
-
-
 void SubimageLayout::createModifiedHanningWindow(cv::Mat& modifiedHanningWindow, const int& sideLength, const double& apodizedAreaPercent, int datatype)
 {
   int apodizedArea = int((apodizedAreaPercent * sideLength) / 100);
@@ -213,3 +219,74 @@ void SubimageLayout::createModifiedHanningWindow(cv::Mat& modifiedHanningWindow,
   //Matrix multiplications of one single colum 1xN by one single row Nx1 matrices, to create a NxN
   modifiedHanningWindow = modifiedHanningSlice.t() * modifiedHanningSlice;
 }
+
+/*
+//phaseScreen:
+cv::Mat phasescreen(const unsigned int& nw, const double& r0, const double& L0)
+{
+  // w=phasescreen(nw,r0,L0)
+  //   D(r) = 6.88*(r/r0)^(5/3)   r<L0
+  //   D(r) = 6.88*(L0/r0)^(5/3)  r>=l0
+  //   sigma_w = sqrt(1/2 D(L0))
+  //
+  
+  auto Dw = [](const double& r, const double& r0, const double& L0) -> double { return 6.88 * std::pow(std::min(r,L0) / r0, 5/3); };
+  
+  auto Cw = [](const double& r, const double& r0, const double& L0) -> double { return 3.44 * std::pow(L0/r0, 5/3) - 3.44 * std::pow(std::min(r,L0)/r0, 5/3); };
+  
+  double np = std::ceil(std::log(nw - 1.0)/std::log(2.0));
+  double n  = std::pow(2.0, np) + 1;
+  cv::Mat w = cv::Mat::zeros(n, n, cv::DataType<double>::type);
+  
+  double wrms2 = 0.5 * Dw(L0,r0,L0);
+  
+  double c0 = wrms2;
+  double r = std::min(n-1, L0);
+  double c1 = wrms2 - 0.5 * Dw(n-1, r0, L0);
+  r = std::min(std::sqrt(2.0) * (n - 1.0), L0);
+  double c2 = wrms2 - 0.5 * Dw(std::sqrt(2.0) * (n - 1.0), r0, L0);
+  
+  double data_C[] = { c0, c1, c1, c2,
+                      c1, c0, c2, c1,
+                      c1, c2, c0, c1,
+                      c2, c1, c1, c0 }; // Covariance matrix
+                      
+  cv::Mat C(4, 4, cv::DataType<double>::type, data_C);
+                     
+  K=chol(C,'lower');  //  C=K*K'
+  
+  u=K*randn(4,1);
+  w(1,1)=u(1);
+  w(n,1)=u(2);
+  w(1,n)=u(3);
+  w(n,n)=u(4);
+  
+  for il=1:np
+  for(unsigned int il = 1; il<np; ++il)
+  {
+      int d = std::pow(2.0, np - il + 1);  // Lado de la celda
+      double alfa  = Cw((double)d / std::sqrt(2.0), r0, L0) / (wrms2 + 2.0 * Cw(d,r0,L0) + Cw(std::sqrt(2.0) * d, r0, L0));
+      double alfa0 = std::sqrt(wrms2 - 4.0 * alfa*alfa * (wrms2 + 2.0 * Cw(d,r0,L0) + Cw(std::sqrt(2.0) * d,r0,L0)));
+      p=(d/2+1):d:n;
+      q=(d+1):d:(n-d);
+      w(p,p)=alfa0*randn(length(p))+alfa*(w(p+d/2,p+d/2)+w(p+d/2,p-d/2)+w(p-d/2,p-d/2)+w(p-d/2,p+d/2));
+      if il>1
+          alfa=Cw(d/2,r0,L0)/(wrms2+2*Cw(d/sqrt(2),r0,L0)+Cw(d,r0,L0));
+          alfa0=sqrt(wrms2-4*alfa^2*(wrms2+2*Cw(d/sqrt(2),r0,L0)+Cw(d,r0,L0)));
+          w(p,q)=alfa0*randn(length(p),length(q))+alfa*(w(p+d/2,q)+w(p-d/2,q)+w(p,q+d/2)+w(p,q-d/2));
+          w(q,p)=alfa0*randn(length(q),length(p))+alfa*(w(q+d/2,p)+w(q-d/2,p)+w(q,p+d/2)+w(q,p-d/2));
+      end
+      A(1,1)=wrms2+Cw(d,r0,L0);
+      A(1,2)=Cw(d/sqrt(2),r0,L0);
+      A(2,1)=2*Cw(d/sqrt(2),r0,L0);
+      A(2,2)=wrms2;
+      alfa=A\[1;1]*Cw(d/2,r0,L0);
+      alfa0=sqrt(wrms2-2*alfa(1)^2*(wrms2+Cw(d,r0,L0))-alfa(2)^2*wrms2-4*alfa(1)*alfa(2)*Cw(d/sqrt(2),r0,L0));
+      w(p,1)=alfa0*randn(length(p),1)+alfa(1)*(w(p+d/2,1)+w(p-d/2,1))+alfa(2)*w(p,1+d/2);
+      w(p,n)=alfa0*randn(length(p),1)+alfa(1)*(w(p+d/2,n)+w(p-d/2,n))+alfa(2)*w(p,n-d/2);
+      w(1,p)=alfa0*randn(1,length(p))+alfa(1)*(w(1,p+d/2)+w(1,p-d/2))+alfa(2)*w(1+d/2,p);
+      w(n,p)=alfa0*randn(1,length(p))+alfa(1)*(w(n,p+d/2)+w(n,p-d/2))+alfa(2)*w(n-d/2,p);
+  }
+  
+}
+*/
