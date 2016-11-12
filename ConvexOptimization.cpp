@@ -26,22 +26,22 @@ ConvexOptimization::~ConvexOptimization()
 cv::Mat ConvexOptimization::gradient_diff(cv::Mat x, const std::function<double(cv::Mat)>& func)
 { //in case gradient function is not available, it could be build with a difference approximation
   //make up gradient vector through slopes and tiny differences
-  double EPS(1.0e-8);
-  cv::Mat df = cv::Mat::zeros(x.size(), x.type());
-  cv::Mat xh = x.clone();
-  double fold = func(x);
-  for(unsigned int j = 0; j < x.total(); ++j)
-  {
-    double temp = x.at<double>(j,0);
-    double h = EPS * std::abs(temp);
-    if (h == 0) h = EPS;
-    xh.at<double>(j,0) = temp + h;
-    h = xh.at<double>(j,0) - temp;
-    double fh = func(xh);
-    xh.at<double>(j,0) = temp;
-    df.at<double>(j,0) = (fh-fold)/h;
-  }
-  return df;
+    double EPS(1.0e-4);
+    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+    for(unsigned int j = 0; j < x.total(); ++j)
+    {
+    	cv::Mat xh = x.clone();
+      cv::Mat xl = x.clone();
+
+      xh.at<double>(j,0) = xh.at<double>(j,0) + EPS;
+      xl.at<double>(j,0) = xl.at<double>(j,0) - EPS;
+      
+      double fh = func(xh);
+      double fl = func(xl);
+      
+      df.at<double>(j,0) = (fh-fl)/(2.0*EPS);
+    }
+    return df;
 };
 
 //perform_BFGS
@@ -65,8 +65,13 @@ void ConvexOptimization::perform_BFGS(cv::Mat &p, std::function<double(cv::Mat)>
 		iter_ = its;
     std::cout << "step " << iter_ << " to minimum. " << "fret: " << fret_ << std::endl;
     std::cout << "p = " << p.t() << std::endl;
+    std::cout << "gradient_diff(p, func): " << gradient_diff(p, func).t() << std::endl;
+    std::cout << "dfunc(p): " << dfunc(p).t() << std::endl;
+    cv::Mat quotient;
+    cv::divide(gradient_diff(p, func), dfunc(p), quotient);
+    std::cout << "quotient gradient_diff(p, func)/dfunc(p): " << quotient.t() << std::endl;
     if(nextStep(p, xi, g, hessin, fret_, func, dfunc)) return;   //minimum reached
-    if(std::abs(old_fret-fret_) < 1.0e-8) {std::cout << "Minimum reached. " << std::endl; return;}
+    //if(std::abs(old_fret-fret_) < 1.0e-8) {std::cout << "Minimum reached. " << std::endl; return;}
     else old_fret = fret_;
 	}
 	throw("too many iterations in dfpmin");

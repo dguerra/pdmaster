@@ -56,6 +56,30 @@ void householder(const cv::Mat& mat, cv::Mat& Q, cv::Mat& R)
   }
 }
 
+
+//Cholesky decomposition of matrix A 
+//!!!being A positive definite matrix: x'Ax>0 for all x≠0!!!
+//returns a lower triangular matrix such that A = L*L'
+void cholesky(const cv::Mat& AA, cv::Mat& LL)
+{
+    int n = AA.cols;
+    double* A = (double*)AA.data;
+    LL = cv::Mat::zeros(n,n,cv::DataType<double>::type);
+    double* L = (double*)LL.data;
+    
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < (i+1); j++) 
+        {
+            double s = 0;
+            for (int k = 0; k < j; k++) s += L[i * n + k] * L[j * n + k];
+            L[i * n + j] = (i == j) ? std::sqrt(A[i * n + i] - s) : (1.0 / L[j * n + j] * (A[i * n + j] - s));
+        }
+    }
+}
+ 
+
+
 //root mean square value of an array, with optional double mask
 double rms(const cv::Mat& A, const cv::Mat& mask)
 {
@@ -158,7 +182,6 @@ void partlyKnownDifferencesInPhaseConstraints(int M, int K, cv::Mat& Q2)
   ce.row(0) = cv::abs(ce.row(0));
   ce.row(1) = cv::abs(ce.row(1));
   ce.row(2) = cv::abs(ce.row(2));
-  
   cv::Mat Q, R;
   householder(ce.t(), Q, R);
   // extracts A columns, 1 (inclusive) to 3 (exclusive).
@@ -1121,5 +1144,3 @@ void magSpectrums( const cv::Mat& src, cv::Mat& dst)
         }
     }
 }
-
-

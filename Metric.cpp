@@ -8,34 +8,27 @@
 #include "ToolBox.h"
 #include "OpticalSetup.h"
 #include "CustomException.h"
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 #include "FITS.h"
 
-//Isolate meanPowerNoise into an independent noise filter function within Metric class
-//Build zernike base only once and keep it inside Metric class as a private member
+//nomenclature:
+//Sj -> Optical Tranfer Function (OTF) for each independent optical path "j"
+//D -> vector containing all data images for each optical path
+//F -> Object estimate = P/Q
+
+
+//Isolate meanPowerNoise into an independent noise filter class together with cutoff pixel information
+//and cutoff_mask to apply to the data spectrums
 
 //To bind the arguments of the member function "hello", within "object"
 //Metric m;
 //auto f = std::bind(&Metric::metric_from_coefs, &m, std::placeholders::_1);
-Metric::Metric(const std::vector<cv::Mat>& D, const double& pupilRadiousPxls, const unsigned int& numberOfElements)
+Metric::Metric(const std::vector<cv::Mat>& D, const std::shared_ptr<Zernike>& zrnk, const double& meanPowerNoise)
+  : zrnk_(zrnk), meanPowerNoise_(meanPowerNoise)
 {
-  pupilRadiousPxls_ = pupilRadiousPxls;
-  
   for(auto Dk : D) D_.push_back(Dk.clone());
-   
-  //zernikeBase_ is static variable so it's initialied once and for all!
-  if(zernikeBase_.empty() == true || zernikeBase_.size() != numberOfElements)  //Only if zernikeBase_ is empty
-  {
-    zernikeBase_.clear();
-    
-    for(unsigned int indx=1; indx <= numberOfElements; ++indx)
-    {
-      //double cte = 1.0/10.0;
-      double cte = 1.0;
-      zernikeBase_.push_back( cte * BasisRepresentation::phaseMapZernike(indx, D_.front().size().width, pupilRadiousPxls_));
-    }
-  }
 }
+
 
 Metric::~Metric()
 {
@@ -53,32 +46,23 @@ void Metric::characterizeOpticalSystem(const cv::Mat& coeffs, std::vector<Optics
   unsigned int pupilSideLength = D_.front().size().width;
   
   unsigned int K = D_.size();   //number of images to use in the algorithm
-  unsigned int M = zernikeBase_.size();   //number of zernike coefficients to use in the representation of each image phase
+  unsigned int M = zrnk_->base().size();   //number of zernike coefficients to use in the representation of each image phase
   if(K * M != coeffs.total()) throw CustomException("Coeffcient vector should contain K*M elements.");
-  //double cte = 1.0/10.0;
-  double cte = 1.0;//100.0;
-  cv::Mat pupilAmplitude = cte *BasisRepresentation::phaseMapZernike(1, pupilSideLength, tsettings.pupilRadiousPixels());
 
-  //Consider the case of two diversity images
-  std::vector<double> diversityFactor = {0.0, tsettings.k()};
+  cv::Mat phase_div = cv::Mat::zeros(coeffs.size(), coeffs.type());
+  phase_div.at<double>(M + 3, 0) = tsettings.k() * 3.141592/(2.0*std::sqrt(3.0));
   
-  std::vector<cv::Mat> diversityPhase;
-  for(double dfactor : diversityFactor)
-  {
-    cv::Mat dPhase_i = (dfactor * 3.141592/(2.0*std::sqrt(3.0))) * cte * BasisRepresentation::phaseMapZernike(4, pupilSideLength, tsettings.pupilRadiousPixels(), false);
-	  diversityPhase.push_back( dPhase_i );
-  }
-  ////////
-  
+  cv::Mat coeffs_new = coeffs + phase_div;
+
   for(unsigned int k=0; k<K; ++k)
   {  //every image coeffcients are within the vector coeefs in the range (a,b), "a" inclusive, "b" exclusive
-    cv::Mat pupilPhase_i = BasisRepresentation::phaseMapZernikeSum(pupilSideLength,tsettings.pupilRadiousPixels(), coeffs(cv::Range(k*M, k*M + M), cv::Range::all()));
-    OS.push_back(Optics(pupilPhase_i + diversityPhase.at(k), pupilAmplitude));  //Characterized optical system
+    cv::Mat pupilPhase_i;
+    zrnk_->synthesize(coeffs_new(cv::Range(k*M, k*M + M), cv::Range::all()), pupilPhase_i);
+    OS.push_back(Optics(pupilPhase_i, zrnk_->base().at(0)));  //Characterized optical system
   }
- 
 }
 
-void Metric::computeQ(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<Optics>& OS, cv::Mat& Q)
+void Metric::computeQ(const cv::Mat& coeffs, const std::vector<Optics>& OS, cv::Mat& Q)
 {
    //We use 'depth' here instead of 'type' because we want 1-channel image
   Q = cv::Mat::zeros(D_.front().size(), D_.front().type());
@@ -93,7 +77,7 @@ void Metric::computeQ(const cv::Mat& coeffs, const std::vector<double>& meanPowe
   }
   
   OpticalSetup tsettings(D_.front().cols);
-  Q.setTo(0, BasisRepresentation::phaseMapZernike(1, Q.cols, tsettings.cutoffPixel()) == 0);
+  //Q.setTo(0, cutoff_mask_ == 0);
 }
 
 void Metric::compute_dQ(const cv::Mat& zernikeElement, const std::vector<Optics>& OS, const unsigned int& j, cv::Mat& dQ)
@@ -111,7 +95,7 @@ void Metric::compute_dQ(const cv::Mat& zernikeElement, const std::vector<Optics>
 }
 
 
-void Metric::computeP(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const std::vector<Optics>& OS, cv::Mat& P)
+void Metric::computeP(const cv::Mat& coeffs, const std::vector<Optics>& OS, cv::Mat& P)
 {
   P = cv::Mat::zeros(D_.front().size(), D_.front().type());
 
@@ -127,7 +111,7 @@ void Metric::computeP(const cv::Mat& coeffs, const std::vector<double>& meanPowe
     cv::accumulate(SjDj, P);   //equivalent to P += SjDj;
   }
   OpticalSetup tsettings(D_.front().cols);
-  P.setTo(0, BasisRepresentation::phaseMapZernike(1, P.cols, tsettings.cutoffPixel()) == 0);
+  //P.setTo(0, cutoff_mask_ == 0);
 }
 
 void Metric::compute_dP(const cv::Mat& zernikeElement, const std::vector<Optics>& OS, const unsigned int& j, cv::Mat& dP)
@@ -140,8 +124,10 @@ void Metric::compute_dP(const cv::Mat& zernikeElement, const std::vector<Optics>
 }
 
 
-void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, const cv::Mat& P, const cv::Mat& Q, cv::Mat& filter)
+void Metric::noiseFilter(const cv::Mat& coeffs, const double& meanPowerNoise, const cv::Mat& P, const cv::Mat& Q, cv::Mat& filter)
 {
+  throw CustomException("Noise filter not implemented yet.");
+  /*
   const double filter_upper_limit(1.0);
   const double filter_lower_limit(0.1);
  
@@ -160,7 +146,7 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanP
   cv::flip(frac, fracFlip, -1); //flipCode => -1 < 0 means two axes flip
   shift(fracFlip, fracFlip, 1, 1);  //shift matrix => 1 means one pixel to the right  
   
-  filter = 1.0 - (meanPowerNoise.front() * (frac + fracFlip)/2.0);
+  filter = 1.0 - (meanPowerNoise * (frac + fracFlip)/2.0);
   
   //remove peaks
   filter.setTo(0, filter < filter_lower_limit);
@@ -169,7 +155,7 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanP
   
   //To zero-out frequencies beyond cutoff
   OpticalSetup tsettings(D_.front().cols);
-  filter.setTo(0, BasisRepresentation::phaseMapZernike(1, filter.cols, tsettings.cutoffPixel()) == 0);
+  filter.setTo(0, cutoff_mask_ == 0);
   
   //select only the central lobe of the filter when represented in the frequency domain
   // Find total markers
@@ -192,25 +178,26 @@ void Metric::noiseFilter(const cv::Mat& coeffs, const std::vector<double>& meanP
 
   filter.setTo(0, markers == 0);
   cv::blur(filter, filter, cv::Size(9,9));
+  */
 }
 
 
 //objective function: L = sum_i{ |D_i - F * S_i|^2 }
 //Objective function : L = sum_i{ |y - Φ(x)|^2 }
-double Metric::objective( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise )
+double Metric::objective( const cv::Mat& coeffs )
 {
   double L(0.0);
   //Intermal metrics
   cv::Mat P, Q, H;
   std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
-  computeQ(coeffs, meanPowerNoise, OS, Q);
-  computeP(coeffs, meanPowerNoise, OS, P);
-  noiseFilter(coeffs, meanPowerNoise, P, Q, H);
+  computeQ(coeffs, OS, Q);
+  computeP(coeffs, OS, P);
+  //noiseFilter(coeffs, meanPowerNoise_, P, Q, H);
 
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F_, cv::DFT_COMPLEX_OUTPUT);
-  cv::mulSpectrums(F_, makeComplex(H), F_, cv::DFT_COMPLEX_OUTPUT);
+  //cv::mulSpectrums(F_, makeComplex(H), F_, cv::DFT_COMPLEX_OUTPUT);
 
   size_t J = OS.size();
   
@@ -219,37 +206,40 @@ double Metric::objective( const cv::Mat& coeffs, const std::vector<double>& mean
   for(unsigned int j = 0; j < J; ++j)
   {
     cv::Mat DjH;
-    cv::mulSpectrums(D_.at(j), makeComplex(H), DjH, cv::DFT_COMPLEX_OUTPUT);
+    //cv::mulSpectrums(D_.at(j), makeComplex(H), DjH, cv::DFT_COMPLEX_OUTPUT);
+    DjH = D_.at(j).clone();
     cv::Mat FHSj;
     cv::Mat Sj = OS.at(j).otf().clone();
     
-    fftShift(Sj);   //shifts fft spectrums and takes energy to the center of the image
+    fftShift(Sj);   //shifts fft spectrums and brings energy to the center of the image
     cv::mulSpectrums(F_, Sj, FHSj, cv::DFT_COMPLEX_OUTPUT);
     cv::accumulateSquare(absComplex(DjH - FHSj), accDiff);
   }
   
   L = cv::sum(accDiff).val[0];
+  
 /*
+  //Alternative way
   cv::Mat absP2, absP2_Q;
-  bool conjB;
+  bool conjB(true);
   cv::mulSpectrums(P, P, absP2, cv::DFT_COMPLEX_OUTPUT, conjB);
   divSpectrums(absP2, Q, absP2_Q, cv::DFT_COMPLEX_OUTPUT);
   cv::Mat accD = cv::Mat::zeros(Q.size(), Q.type());
-  for(auto Di : D)
+  for(auto Di : D_)
   {
     cv::Mat absDi2;
     cv::mulSpectrums(Di, Di, absDi2, cv::DFT_COMPLEX_OUTPUT, conjB);
     accD += absDi2;
   }
-  std::cout << cv::sum(accD-absP2_Q).val[0] << " " << L << std::endl;
-  */
+  std::cout << "Values for objective function: " << cv::sum(accD-absP2_Q).val[0] << " " << L << std::endl;
+*/
   return L;
 }
 
-void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, cv::Mat& De )
+void Metric::phi( const cv::Mat& coeffs, cv::Mat& De )
 {
   std::vector<cv::Mat> De_v;
-  phi(coeffs, meanPowerNoise, De_v);
+  phi(coeffs, De_v);
   std::vector<cv::Mat> de_v;
   for(auto Dei : De_v )
   {
@@ -260,14 +250,14 @@ void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoi
 }
 
 //Object estimate convoluted with OTFi for a given phase coefficient vector
-void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, std::vector<cv::Mat>& De )
+void Metric::phi( const cv::Mat& coeffs, std::vector<cv::Mat>& De )
 {
   cv::Mat P, Q, H, F;
   std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
-  computeQ(coeffs, meanPowerNoise, OS, Q);
-  computeP(coeffs, meanPowerNoise, OS, P);
-  noiseFilter(coeffs, meanPowerNoise, P, Q, H);
+  computeQ(coeffs, OS, Q);
+  computeP(coeffs, OS, P);
+  //noiseFilter(coeffs, meanPowerNoise_, P, Q, H);
 
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F, cv::DFT_COMPLEX_OUTPUT);
@@ -285,10 +275,10 @@ void Metric::phi( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoi
   }
 }
 
-void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, cv::Mat& jacob )
+void Metric::jacobian( const cv::Mat& coeffs, cv::Mat& jacob )
 {
   std::vector<std::vector<cv::Mat> > jacob_v;
-  jacobian( coeffs, meanPowerNoise, jacob_v );
+  jacobian( coeffs, jacob_v );
   
   std::vector<cv::Mat> blockMatrix;
   std::vector<cv::Mat> res;
@@ -311,14 +301,14 @@ void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPow
 
 
 //Compute the jacobian of Φ in the equation: y = Φ(x) + e
-void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise, std::vector<std::vector<cv::Mat> >& jacob )
+void Metric::jacobian( const cv::Mat& coeffs, std::vector<std::vector<cv::Mat> >& jacob )
 {
   cv::Mat P, Q, H, F;
   std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
-  computeQ(coeffs, meanPowerNoise, OS, Q);
-  computeP(coeffs, meanPowerNoise, OS, P);
-  noiseFilter(coeffs, meanPowerNoise, P, Q, H);
+  computeQ(coeffs, OS, Q);
+  computeP(coeffs, OS, P);
+  //noiseFilter(coeffs, meanPowerNoise_, P, Q, H);
 
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F, cv::DFT_COMPLEX_OUTPUT);
@@ -328,7 +318,7 @@ void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPow
   cv::mulSpectrums(Q, Q, Q2, cv::DFT_COMPLEX_OUTPUT);
   
   size_t J = OS.size();
-  size_t M = zernikeBase_.size();
+  size_t M = zrnk_->base().size();
   
   jacob.clear();
   for(unsigned int j = 0; j < J; ++j)
@@ -347,13 +337,13 @@ void Metric::jacobian( const cv::Mat& coeffs, const std::vector<double>& meanPow
         cv::Mat dPSj, dSj, dP, dQ, lterm, rterm, tt;
         if(j == k)
         {
-          compute_dSj(OS.at(j), zernikeBase_.at(m), dSj);
+          compute_dSj(OS.at(j), zrnk_->base().at(m), dSj);
           cv::mulSpectrums(P, dSj, PdSj, cv::DFT_COMPLEX_OUTPUT);
         }
-        compute_dP(zernikeBase_.at(m), OS, k, dP);
+        compute_dP(zrnk_->base().at(m), OS, k, dP);
         cv::mulSpectrums(dP, Sj, dPSj, cv::DFT_COMPLEX_OUTPUT);
         cv::mulSpectrums(Q, dPSj+PdSj, lterm, cv::DFT_COMPLEX_OUTPUT);
-        compute_dQ(zernikeBase_.at(m), OS, k, dQ);
+        compute_dQ(zrnk_->base().at(m), OS, k, dQ);
         cv::mulSpectrums(dQ, PSj, rterm, cv::DFT_COMPLEX_OUTPUT);
         divSpectrums(lterm-rterm, Q2, tt, cv::DFT_COMPLEX_OUTPUT);
         vecM.push_back(tt);
@@ -390,26 +380,27 @@ void Metric::compute_dSj(const Optics& osj, const cv::Mat& zernikeElement, cv::M
 
 
 //gradient of the whole objective function: L = sum_i{ |D_i - F * S_i|^2 } with respect to every parameter of the phase
-cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& meanPowerNoise )
+cv::Mat Metric::gradient( const cv::Mat& coeffs )
 {
   //Intermal metrics
   cv::Mat P, Q, H, F;
   std::vector<Optics> OS;
   characterizeOpticalSystem(coeffs, OS);
-  computeP(coeffs, meanPowerNoise, OS, P);
-  computeQ(coeffs, meanPowerNoise, OS, Q);
+  computeP(coeffs, OS, P);
+  computeQ(coeffs, OS, Q);
   //Some useful calculations
   bool conjB(true);
-  noiseFilter(coeffs, meanPowerNoise, P, Q, H);
+  //noiseFilter(coeffs, meanPowerNoise_, P, Q, H);
   //Object estimate: F = (P/Q) x filter
   divSpectrums(P, Q, F, cv::DFT_COMPLEX_OUTPUT);
-  cv::mulSpectrums(F, makeComplex(H), F, cv::DFT_COMPLEX_OUTPUT);   //Filter the object estimate out
+  //cv::mulSpectrums(F, makeComplex(H), F, cv::DFT_COMPLEX_OUTPUT);   //Filter the object estimate out
   
   size_t J = OS.size();
-  size_t M = zernikeBase_.size();
+  size_t M = zrnk_->base().size();
   
   cv::Mat g = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
 
+  Zernike zrnk;
 
   for(size_t j = 0; j < J; ++j)
   {
@@ -418,7 +409,7 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& mean
     cv::Mat Sj = OS.at(j).otf().clone();
     fftShift(Sj);
     OpticalSetup tsettings(D_.front().cols);
-    Sj.setTo(0, BasisRepresentation::phaseMapZernike(1, Sj.cols, tsettings.cutoffPixel()) == 0);
+//    Sj.setTo(0, cutoff_mask_ == 0);   //restore when filter noise implemented again
     
     cv::Mat abs2F, abs2FSj;
     cv::mulSpectrums(F, F, abs2F, cv::DFT_COMPLEX_OUTPUT, conjB);
@@ -430,19 +421,18 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& mean
     for(size_t m = 0; m < M; ++m)
     {
       cv::Mat dSj, dSjV;
-      compute_dSj(OS.at(j), zernikeBase_.at(m), dSj);
+      compute_dSj(OS.at(j), zrnk_->base().at(m), dSj);
       cv::mulSpectrums(dSj, V, dSjV, cv::DFT_COMPLEX_OUTPUT);
-      if(!zernikeBase_.at(m).empty()) {g.at<double>((j * M) + m, 0) =  cv::sum(dSjV).val[0];}  //Is it possible to do it with cv::dot??
-      else {g.at<double>((j * M) + m, 0) = 0.0;}
+      g.at<double>((j * M) + m, 0) =  cv::sum(dSjV).val[0];
     }
   }
   
-  
+/*
   //Alternate way of getting the gradient through dP and dQ
   std::vector<cv::Mat> De;
   std::vector<std::vector<cv::Mat> > jacob;
-  phi(coeffs, meanPowerNoise, De);
-  jacobian(coeffs, meanPowerNoise, jacob);
+  phi(coeffs, De);
+  jacobian(coeffs, jacob);
   cv::Mat g_phi = cv::Mat::zeros(J*M, 1, cv::DataType<double>::type);
   
   for(size_t j = 0; j < J; ++j)
@@ -457,11 +447,12 @@ cv::Mat Metric::gradient( const cv::Mat& coeffs, const std::vector<double>& mean
     }
   }
   
-  //std::cout << "g: " << g.t() << std::endl;
-  //std::cout << "g_phi: " << g_phi.t() << std::endl;
+  std::cout << "g: " << g.t() << std::endl;
+  std::cout << "g_phi: " << g_phi.t() << std::endl;
+  std::cout << "g/g_phi: " << g.t()/g_phi.t() << std::endl;
   //g_phi.copyTo(g);
-  
-  g = g / zernikeBase_.front().total();
+*/
+  g = g / zrnk_->base().front().total();
 
   return g;
 }

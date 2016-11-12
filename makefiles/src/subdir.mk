@@ -6,6 +6,7 @@
 CPP_SRCS += \
 ../FITS.cpp \
 ../SparseRecovery.cpp \
+../PhaseScreen.cpp \
 ../ImageQualityMetric.cpp \
 ../ConvexOptimization.cpp \
 ../Metric.cpp \
@@ -18,11 +19,12 @@ CPP_SRCS += \
 ../OpticalSetup.cpp \
 ../TestRoom.cpp \
 ../WavefrontSensor.cpp \
-../BasisRepresentation.cpp 
+../Zernike.cpp 
 
 OBJS += \
 ./src/FITS.o \
 ./src/SparseRecovery.o \
+./src/PhaseScreen.o \
 ./src/ImageQualityMetric.o \
 ./src/ConvexOptimization.o \
 ./src/Metric.o \
@@ -35,11 +37,12 @@ OBJS += \
 ./src/OpticalSetup.o \
 ./src/TestRoom.o \
 ./src/WavefrontSensor.o \
-./src/BasisRepresentation.o 
+./src/Zernike.o 
 
 CPP_DEPS += \
 ./src/FITS.d \
 ./src/SparseRecovery.d \
+./src/PhaseScreen.d \
 ./src/ImageQualityMetric.d \
 ./src/ConvexOptimization.d \
 ./src/Metric.d \
@@ -52,7 +55,7 @@ CPP_DEPS += \
 ./src/OpticalSetup.d \
 ./src/TestRoom.d \
 ./src/WavefrontSensor.d \
-./src/BasisRepresentation.d 
+./src/Zernike.d 
 
 
 # default: g++ -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<"

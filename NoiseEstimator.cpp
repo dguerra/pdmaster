@@ -5,7 +5,7 @@
 
 #include "NoiseEstimator.h"
 #include "OpticalSetup.h"
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 #include "FITS.h"
 
 NoiseEstimator::NoiseEstimator()
@@ -59,9 +59,10 @@ void NoiseEstimator::meanPowerSpectrum(const cv::Mat& img)
     std::cout << "cutoffPixel: " << tsettings.cutoffPixel() << std::endl;
     cv::Mat mask = cv::Mat::ones(powerSpectrum.size(), powerSpectrum.depth());
 
-    //Mask to onlyu consider pixel values after cutoff, which are due to noise only
-    mask.setTo(0, BasisRepresentation::phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
-    //mask.setTo(0, BasisRepresentation::phaseMapZernike(1, mask.cols, mask.cols/2) != 0);
+    //Mask to only consider pixel values after cutoff, which are due to noise only
+    Zernike zrnk;
+    mask.setTo(0, zrnk.phaseMapZernike(1, mask.cols, tsettings.cutoffPixel()) != 0);
+    //mask.setTo(0, zrnk.phaseMapZernike(1, mask.cols, mask.cols/2) != 0);
     mask.colRange(int((mask.cols/2)-(mask.cols/6)),int((mask.cols/2)+(mask.cols/6))) = cv::Scalar(0);
     mask.rowRange(int((mask.rows/2)-(mask.rows/6)),int((mask.rows/2)+(mask.rows/6))) = cv::Scalar(0);
 

@@ -26,7 +26,14 @@ make clean
 //To commit and add files to the repository do the following:
 //#1 Clean binaries to make sure it only commit changes to modules
 make clean
+
+//#2 Add new, deleted, and modified files to stage
+git add -A
+
+//Ctrl + X: to exit from nano editor from terminal
+
 //#2 Add files commit to local
 git commit -a -m "Commit message goes here"
+
 //#3 Push your commit/messages to the host (github)
 git push

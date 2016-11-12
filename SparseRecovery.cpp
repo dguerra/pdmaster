@@ -22,6 +22,8 @@ cv::Mat perform_projection(const cv::Mat& Phi0, const cv::Mat& y0)
   // Ax = b
   // x = cv::solve(A, b);     % A\b or mldivide(A,b)
   cv::Mat x;
+  //cv::DECOMP_QR, cv::DECOMP_NORMAL (default), cv::DECOMP_SVD
+           
   cv::solve(Phi, y, x, cv::DECOMP_NORMAL);
 
   
@@ -225,16 +227,20 @@ cv::Mat perform_IHT(const cv::Mat& Phi0, const cv::Mat& y0, const unsigned int& 
   return x.clone();
 }
 
-cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, std::vector<double>& gamma_v, const unsigned int& blkLength)
+
+//Sparse bayesian learning, NO block structure
+cv::Mat perform_SBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, std::vector<double>& gamma_v)
 {
+  
   std::cout.precision( std::numeric_limits<double>::digits10 + 1);
-  double EPSILON       =  1e-9;      // solution accurancy tolerance  
+  double EPSILON       =  1e-3;  //1e-9;      // solution accurancy tolerance  
   unsigned int MAX_ITERS     = 3;        // maximum iterations
 
   cv::Mat y, Phi, Phi_0;
   bool ComplexValued = complexToRealValued(Phi0, y0, Phi, y);
 
-
+  //DEBUG
+  //Normalize the columns to be vectors from the unit sphere
   cv::Mat PhiPhi, sumPhiPhi, sqrtsumPhiPhi;
   cv::multiply(Phi, Phi, PhiPhi);
   cv::reduce(PhiPhi, sumPhiPhi, 0, CV_REDUCE_SUM);   //sum every column a reduce matrix to a single row
@@ -242,7 +248,212 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
   cv::sqrt(sumPhiPhi, sqrtsumPhiPhi);
   cv::divide(Phi, cv::Mat::ones(Phi.rows,1,cv::DataType<double>::type) * sqrtsumPhiPhi, Phi);
 
+  Phi.copyTo(Phi_0);   //Save a copy of the initial Phi for later use
   
+  // scaling... 
+  cv::Scalar mean, std;
+  cv::meanStdDev(y, mean, std);
+  double std_n = sqrt(std.val[0]*std.val[0]*y.total()/(y.total()-1));   //Std normalized to N-1 isntead of N
+  if ((std_n < 0.4) || (std_n > 1)) y = 0.4*y/std_n;
+
+  //stopping criteria used : (OldRMS-NewRMS)/RMS(x) < stopTol
+  double sigsize = y.dot(y)/y.total();
+  double old_err = sigsize;
+
+  // Default Parameter Values for Any Cases
+  bool PRINT         = true;          // don't show progress information
+  double PRUNE_GAMMA;
+  double lambda;
+  unsigned int blkNumber(Phi.cols);    //total number of blocks
+  
+  //if (LearnLambda == NoiseLevel::Noiseless) { lambda = 1e-12;   PRUNE_GAMMA = 1e-3; }
+  if (LearnLambda == NoiseLevel::Noiseless) { lambda = 1e-12;   PRUNE_GAMMA = 1e-3; }
+  else if(LearnLambda == NoiseLevel::LittleNoise) { lambda = 1e-3;    PRUNE_GAMMA = 1e-2; }
+  else if(LearnLambda == NoiseLevel::Noisy) { lambda = 1e-3;    PRUNE_GAMMA = 1e-2; }
+  else CustomException("Unrecognized Value for Input Argument LearnLambda");
+
+
+  // Initialization: [N,M] = size(Phi);
+  unsigned int N = Phi.rows;
+  unsigned int M = Phi.cols;
+  std::cout << "N: " << N << ", M: " << M << std::endl;
+  std::list<Block> blkList;
+  unsigned int pos(0);
+  //Initialize block list: same size blocks
+  for(unsigned int k=0; k<Phi.cols; ++k)
+  {
+    blkList.push_back( Block(k, k, 1, gamma_v.at(k), cv::Mat() ));
+  }
+  
+  cv::Mat mu_x = cv::Mat::zeros(M, 1, cv::DataType<double>::type);
+  unsigned int count;
+  size_t lsize = blkNumber;
+  
+  // Iteration: MAX_ITERS
+  for (count = 1; count < MAX_ITERS; ++count)
+  {
+    //std::cout << "SBL Iteration: " << count << std::endl;
+    blkList.remove_if( [PRUNE_GAMMA](const Block& blk)->bool {return blk.gamma() < PRUNE_GAMMA;} );
+    
+    if(lsize != blkList.size())
+    {
+      lsize = blkList.size();
+      if(blkList.empty())
+      {//"Try smaller values of 'prune_gamma' and 'EPSILON' or normalize 'y' to unit norm."
+        std::cout <<  "x becomes zero vector. The solution may be incorrect. " << std::endl;
+        break; 
+      }
+      // construct new Phi
+      std::vector<cv::Mat> v_Phi;
+      for(auto blk : blkList) v_Phi.push_back( Phi_0.col(blk.startLoc()) );
+      cv::hconcat(v_Phi, Phi);
+    }
+    
+    //=================== Compute new weights =================
+    cv::Mat mu_old = mu_x.clone();  //Save solution vector for later
+  
+    cv::Mat PhiBPhi = cv::Mat::zeros(N, N, cv::DataType<double>::type);
+    
+    pos = 0;
+    for(auto blk : blkList)
+    {
+      cv::accumulate(Phi.col(pos) * blk.gamma() * Phi.col(pos).t(), PhiBPhi);
+      pos++;
+    }
+
+    cv::Mat lambdaI(PhiBPhi.size(), cv::DataType<double>::type);
+    cv::setIdentity(lambdaI, lambda);
+    
+    cv::Mat den = PhiBPhi + lambdaI;
+    //Matrix right division should be implemented cv::solve instead of by inverse multiplication
+    // xA = b  => x = b/A but never use x = b * inv(A)!!!
+    //They are mathematically equivalent but not the same when working with floating numbers
+    //x = cv.solve( A.t(), b.t() ).t();  equivalent to b/A
+    //to perform matrix right division: mrdivide(b,A)
+    cv::Mat H;
+    cv::solve(den.t(), Phi, H, cv::DECOMP_NORMAL);
+    //std::cout << "den: " << den << std::endl;
+    cv::Mat Hy = H.t() * y;
+    cv::Mat HPhi = H.t() * Phi;
+
+    std::vector<cv::Mat> v_mu_x;
+    pos = 0;
+    for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
+    {  //Do not apply c++11 style loop here. Those references don't work 
+      cv::Mat mu_xi = blk->gamma() * Hy.row(pos);
+      blk->Sigma_x(blk->gamma() - blk->gamma() * HPhi.row(pos).col(pos) * blk->gamma());
+      blk->Cov_x( blk->Sigma_x() + mu_xi * mu_xi.t() );
+      v_mu_x.push_back( mu_xi );
+      pos++;
+    }
+    cv::vconcat( v_mu_x, mu_x );
+
+     //gamma_old = gamma;   #######################################################3
+    double lambdaComp(0.0);
+    
+    //===========  estimate gamma(i) and lambda  =========== 
+//    for(Block blk : blkList)
+
+    pos = 0;
+    for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
+    {
+      if(LearnLambda == NoiseLevel::Noisy)
+      {
+        lambdaComp += cv::trace( Phi.col(pos) * blk->Sigma_x() * 
+                                 Phi.col(pos).t() ).val[0];
+      }
+      else if(LearnLambda == NoiseLevel::LittleNoise)
+      {
+        lambdaComp += cv::trace(blk->Sigma_x()).val[0] / blk->gamma(); 
+      }
+      
+      blk->gamma( cv::trace(blk->Cov_x()).val[0] / blk->Cov_x().cols );
+
+      pos++;
+    }
+    
+    //LearnLambda == Noiseless, means no lambda value should be estimated
+    if(LearnLambda == NoiseLevel::Noisy)
+    {
+      double normL2 = cv::norm(y - (Phi * mu_x), cv::NORM_L2);
+      lambda = (normL2*normL2)/N + lambdaComp/N;
+    }
+    else if(LearnLambda == NoiseLevel::LittleNoise)
+    {
+      double normL2 = cv::norm(y - (Phi * mu_x), cv::NORM_L2);
+      std::cout << "lambdaComp: " << lambdaComp << std::endl;
+      lambda = (normL2*normL2)/N + lambda * (mu_x.total() - lambdaComp)/N; 
+    }
+
+  
+  //test gamma
+  gamma_v = std::vector<double>(blkNumber, 0.0);
+  for(auto blk : blkList) gamma_v.at(blk.startLoc()) = blk.gamma();
+  
+    // ================= Check stopping conditions, eyc. ==============
+    if ( mu_x.total() == mu_old.total() )
+    {
+      //cv::absdiff(mu_old, mu_x, diff);
+      cv::Mat diff = cv::abs(mu_old - mu_x);
+      double maxVal;
+      cv::minMaxLoc(diff, nullptr, &maxVal, nullptr, nullptr);
+      if (maxVal < EPSILON)
+      {
+        std::cout << "iteration: " << count << std::endl;
+        std::cout << "Solution found." << std::endl;
+        std::cout << "lambda: " << lambda << std::endl;
+        break;
+      }
+    }
+
+  }
+  
+  
+  // reconstruct the original signal &  Expand hyperparameyers
+  cv::Mat x = cv::Mat::zeros(M,1, cv::DataType<double>::type);
+  pos = 0;
+  for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
+  {
+    mu_x.row(pos).copyTo( x.row(blk->startLoc()) );
+    pos++;
+  }
+  
+  //DEBUG
+  cv::divide(x, sqrtsumPhiPhi.t(), x);
+  
+  std::cout << "x:" << x.t() << std::endl;
+  if(ComplexValued)
+  {
+    cv::Mat xx_real = x( cv::Range(0, M/2), cv::Range::all() ).clone();
+    cv::Mat xx_imag = x( cv::Range(M/2, M), cv::Range::all() ).clone();
+    std::vector<cv::Mat> x_v = {xx_real, xx_imag};
+    cv::merge(x_v, x);
+  }
+
+  if ((std_n < 0.4) | (std_n > 1))  x = x * std_n/0.4;
+  
+  return x.clone();
+
+}
+
+cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, std::vector<double>& gamma_v, const unsigned int& blkLength)
+{
+  std::cout.precision( std::numeric_limits<double>::digits10 + 1);
+  double EPSILON       =  1e-9;  //1e-3;      // solution accurancy tolerance  
+  unsigned int MAX_ITERS     = 3;        // maximum iterations
+
+  cv::Mat y, Phi, Phi_0;
+  bool ComplexValued = complexToRealValued(Phi0, y0, Phi, y);
+
+  //DEBUG
+  //Normalize the columns to be vectors from the unit sphere
+  cv::Mat PhiPhi, sumPhiPhi, sqrtsumPhiPhi;
+  cv::multiply(Phi, Phi, PhiPhi);
+  cv::reduce(PhiPhi, sumPhiPhi, 0, CV_REDUCE_SUM);   //sum every column a reduce matrix to a single row
+  sqrtsumPhiPhi = sqrtsumPhiPhi;
+  cv::sqrt(sumPhiPhi, sqrtsumPhiPhi);
+  cv::divide(Phi, cv::Mat::ones(Phi.rows,1,cv::DataType<double>::type) * sqrtsumPhiPhi, Phi);
+
   Phi.copyTo(Phi_0);   //Save a copy of the initial Phi for later use
   
   // scaling... 
@@ -292,6 +503,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
   //Initialize block list: same size blocks
   for(unsigned int k=0; k<blkNumber; ++k)
   {
+    //blkList.push_back( Block(k, k*blkLength, blkLength, ComplexValued && k < blkNumber/2 ? 1.0 :  0.0, cv::Mat::eye(blkLength, blkLength, cv::DataType<double>::type) ));
     blkList.push_back( Block(k, k*blkLength, blkLength, gamma_v.at(k), cv::Mat::eye(blkLength, blkLength, cv::DataType<double>::type) ));
   }
   
@@ -342,8 +554,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
       cv::accumulate(snipPhi * blk->Sigma_0() * snipPhi.t(), PhiBPhi);
       pos += blk->length();
     }
-    
-    //look the function cv::setIdentity
+
     cv::Mat lambdaI(PhiBPhi.size(), cv::DataType<double>::type);
     cv::setIdentity(lambdaI, lambda);
     
@@ -355,10 +566,9 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     //to perform matrix right division: mrdivide(b,A)
     cv::Mat H;
     cv::solve(den.t(), Phi, H, cv::DECOMP_NORMAL);
-    
+    //std::cout << "den: " << den << std::endl;
     cv::Mat Hy = H.t() * y;
     cv::Mat HPhi = H.t() * Phi;
-    
     
     cv::Mat B(blkLength, blkLength, cv::DataType<double>::type); 
     cv::Mat invB(blkLength, blkLength, cv::DataType<double>::type);
@@ -371,6 +581,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     {
       cv::Mat mu_xi = blk->Sigma_0() * Hy(cv::Range(pos, pos + blk->length()), cv::Range::all());       // solution
       blk->Sigma_x( blk->Sigma_0() - blk->Sigma_0() * HPhi(cv::Range(pos, pos + blk->length()), cv::Range(pos, pos + blk->length())) * blk->Sigma_0() );
+      std::cout << "blk.Sigma_x(): " << blk->Sigma_x() << std::endl;
       blk->Cov_x( blk->Sigma_x() + mu_xi * mu_xi.t() );
       pos += blk->length();
       v_mu_x.push_back( mu_xi );
@@ -382,6 +593,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     }
     cv::vconcat( v_mu_x, mu_x );
     
+//    std::cout << "mu_x: " << mu_x << std::endl;
     //=========== Learn correlation structure in blocks with Constraint 1 ===========
     // If blocks have the same size
     if (intrablockCorrelation == true)
@@ -445,19 +657,25 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     else if(LearnLambda == NoiseLevel::LittleNoise)
     {
       double normL2 = cv::norm(y - (Phi * mu_x), cv::NORM_L2);
+      std::cout << "lambdaComp: " << lambdaComp << std::endl;
       lambda = (normL2*normL2)/N + lambda * (mu_x.total() - lambdaComp)/N; 
     }
+
   
   //test gamma
   gamma_v = std::vector<double>(blkNumber, 0.0);
   pos = 0;
   for(auto blk = blkList.begin(); blk != blkList.end(); ++blk)
   {
+    std::cout << "blk->gamma(): " << blk->gamma() << std::endl;
     gamma_v.at(blk->startLoc() / blk->length()) = blk->gamma();
+    //std::cout << blk->gamma() << std::endl;
   }
   //for_each(gamma_v.begin(), gamma_v.end(), [](const double& d){std::cout << d << std::endl;});
   ////
   
+    //std::cout << "mu_old: " << mu_old.t() << std::endl;
+    //std::cout << "mu_x: " << mu_x.t() << std::endl;
   
     // ================= Check stopping conditions, eyc. ==============
     if ( mu_x.total() == mu_old.total() )
@@ -468,6 +686,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
       cv::minMaxLoc(diff, nullptr, &maxVal, nullptr, nullptr);
       if (maxVal < EPSILON)
       {
+        std::cout << "iteration: " << count << std::endl;
         std::cout << "Solution found." << std::endl;
         std::cout << "B: " << B << std::endl;
         std::cout << "lambda: " << lambda << std::endl;
@@ -496,7 +715,9 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     pos += blk->length();
   }
   
+  //DEBUG
   cv::divide(x, sqrtsumPhiPhi.t(), x);
+  
   std::cout << "x:" << x.t() << std::endl;
   if(ComplexValued)
   {
@@ -506,6 +727,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     cv::merge(x_v, x);
   }
 
+  if ((std_n < 0.4) | (std_n > 1))  x = x * std_n/0.4;
   std::cout << "x: " << x.t() << std::endl;
   
   if(PRINT)
@@ -515,7 +737,7 @@ cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& L
     //for_each(gamma_est.begin(), gamma_est.end(), [](const double& d){std::cout << d << std::endl;});
   }
   
-  if ((std_n < 0.4) | (std_n > 1))  x = x * std_n/0.4;
+  
   return x.clone();
 }
 

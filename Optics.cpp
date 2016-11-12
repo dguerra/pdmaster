@@ -51,7 +51,7 @@ void Optics::compute_OTF_(const cv::Mat& phase, const cv::Mat& amplitude, cv::Ma
   }
 }
 
-
+//Rename as complex amplitude
 void Optics::compute_GeneralizedPupilFunction_(const cv::Mat& phase, const cv::Mat& amplitude, cv::Mat& generalizedPupilFunction)
 {
   //CAUTION it has to be done generic type
@@ -59,6 +59,7 @@ void Optics::compute_GeneralizedPupilFunction_(const cv::Mat& phase, const cv::M
   if (phase.channels() == 1 && amplitude.channels() == 1 && phase.size() == amplitude.size() && phase.type() == amplitude.type())
   {
     cv::Mat cosPhase(phase.size(), phase.type()), sinPhase(phase.size(), phase.type());
+    
     auto itCos = cosPhase.begin<double>();
     auto itSin = sinPhase.begin<double>();
     for(auto it = phase.begin<double>(), itEnd = phase.end<double>(); it != itEnd; ++it)

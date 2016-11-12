@@ -19,7 +19,7 @@ class WavefrontSensor
 public:
   WavefrontSensor();
   virtual ~WavefrontSensor();
-  cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise);
+  cv::Mat WavefrontSensing(const std::vector<cv::Mat>& d, const double& meanPowerNoise);
   static void subimageLayout(const cv::Size& dim, const unsigned int& pixelsBetweenTiles, const unsigned int& tileSize, std::vector<std::pair<cv::Range,cv::Range> >& tileRngs);
   
 private:

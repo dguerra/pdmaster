@@ -12,7 +12,7 @@
 #include <random>
 #include "TestRoom.h"
 #include "ToolBox.h"
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 #include "NoiseEstimator.h"
 #include "Optics.h"
 #include "FITS.h"
@@ -20,7 +20,208 @@
 #include "OpticalSetup.h"
 #include "ImageQualityMetric.h"
 #include "ConvexOptimization.h"
+#include <memory>
 
+
+void test_jacobian()
+{
+  
+  
+}
+
+//ML playgound:
+//linear models
+void leastSquearesExperiment()
+{
+  //We have N=15 samples from y=sin(x) in the interval [0,2π] and add gaussian noise
+  unsigned int N = 5;  //Number of samples
+  const double pi = 3.14159265358979323846;  /* pi */
+  double startPoint(0.0);
+  double endPoint(2.0 * pi);
+  double stepSize((endPoint-startPoint)/double(N-1));
+  cv::Mat x,t;
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
+  cv::RNG& rng = cv::theRNG();
+      
+  for(double xi=startPoint; xi<=endPoint; xi=xi+stepSize)
+  {
+    x.push_back(xi);
+    t.push_back(sin(xi)+rng.gaussian(0.2));
+  }
+  std::cout << "x: " << x.t() << std::endl;
+  std::cout << "t: " << t.t() << std::endl;
+  
+  //Suppose now I want to modeled the system with a combination of M potentially nonlinear basis functions such as radial basis functions, RBF
+  auto rbf = [](const double& x, const double& xm, const double& r) -> double
+  { //exp(-(x-xm)^2/r^2)
+    return std::exp(-std::pow(x-xm,2.0)/(r*r));
+  }; 
+
+  std::vector<cv::Mat> phi_v;
+  for(double xm=startPoint; xm<=endPoint; xm=xm+stepSize)
+  {
+    cv::Mat phi_m;
+    //We use the same locations for the center of the radial functions
+    for(double xi=startPoint; xi<=endPoint; xi=xi+stepSize)
+    {
+      phi_m.push_back(rbf(xi,xm,1.0));
+    }
+    phi_v.push_back(phi_m);
+  }
+  cv::Mat phi;
+  cv::hconcat(phi_v, phi);
+
+
+  //Apply least squares to find the weights
+  cv::Mat w = (phi.t()*phi+0.5*cv::Mat::eye(N,N,cv::DataType<double>::type)).inv()*phi.t()*t;   //Ridge regression
+  //std::cout << "Ridge regression weights: " << w << std::endl;
+  //cv::Mat w = (phi.t()*phi).inv()*phi.t()*t;   //Least squares
+
+  std::vector<double> gamma_v(phi.cols, 1.0);
+  w = perform_BSBL(phi, t, NoiseLevel::LittleNoise, gamma_v, 1);  //Noiseless, LittleNoise
+  std::cout << "BSBL: " << w << std::endl;  
+  
+  gamma_v = std::vector<double>(phi.cols, 1.0);
+  w = perform_SBL(phi, t, NoiseLevel::LittleNoise, gamma_v);  //Noiseless, LittleNoise
+  std::cout << "SBL: " << w << std::endl;  
+  
+  std::cout << "END" << std::endl;  
+  
+/*  
+  cv::Mat mu_x_old = cv::Mat::zeros(phi.cols, 1, cv::DataType<double>::type);
+  cv::Mat Sigma_x, mu_x;
+  cv::Mat gamma = cv::Mat::ones(phi.cols, phi.cols, cv::DataType<double>::type);
+  double lambda(1e-3);
+  
+  for(unsigned int i=0;i<100;++i)
+  {
+    cv::Mat PhiGammPhiT = phi*gamma*phi.t();
+    cv::Mat lambdaI(PhiGammPhiT.size(), cv::DataType<double>::type);
+    cv::setIdentity(lambdaI, lambda);
+      
+    cv::Mat den = PhiGammPhiT + lambdaI;
+    //Matrix right division should be implemented cv::solve instead of by inverse multiplication
+    // xA = b  => x = b/A but never use x = b * inv(A)!!!
+    //They are mathematically equivalent but not the same when working with floating numbers
+    //x = cv.solve( A.t(), b.t() ).t();  equivalent to b/A
+    //to perform matrix right division: mrdivide(b,A)
+    cv::Mat H;
+    cv::solve(den.t(), phi, H, cv::DECOMP_NORMAL);
+    std::cout << "Hello" << std::endl;
+      
+    cv::Mat Hy = H.t() * t;
+    cv::Mat HPhi = H.t() * phi;
+      
+    mu_x = gamma * Hy;
+    
+    cv::Mat diff = cv::abs(mu_x_old - mu_x);
+    double maxVal;
+    cv::minMaxLoc(diff, nullptr, &maxVal, nullptr, nullptr);
+    if (maxVal < 1e-4)
+    {
+      std::cout << "Solution found." << std::endl;
+      break;
+    }
+    
+    Sigma_x = gamma - gamma * HPhi * gamma;  
+      
+    cv::Mat mu_x2;
+    cv::multiply(mu_x, mu_x, mu_x2);
+    gamma = Sigma_x + mu_x2;
+    
+    double l2 = cv::norm(t-(phi*mu_x), cv::NORM_L2);
+    lambda = ((l2*l2) + cv::trace(phi*Sigma_x*phi.t()).val[0])/phi.rows;
+  }
+
+  w = mu_x.clone();
+  std::cout << "Sparse Bayesian Learning weights: " << w << std::endl;
+*/
+
+/*
+  //Show result: (prediction)
+  cv::Mat result;
+  cv::Mat cur;
+  for(double cursor=startPoint;cursor<=endPoint;cursor=cursor+0.01)
+  {
+    double val(0.0);
+    int i(0);
+    for(double xm=startPoint; xm<=endPoint; xm=xm+stepSize)
+    {
+      val = val + w.at<double>(i++,0) * rbf(cursor,xm,1.0);
+    }
+    result.push_back(val);
+    cur.push_back(cursor);
+  }
+
+  //std::cout << "phi: " << phi << std::endl;
+  cv::Mat plot_data, plot_result;
+  Plot2d plot1( x,t );
+  Plot2d plot2( cur,result );
+  //cv::plot->setPlotBackgroundColor( cv::Scalar( 50, 50, 50 ) ); // i think it is not implemented yet
+  plot1.setPlotLineColor( cv::Scalar( 255, 255, 255 ) );
+  plot1.setPlotLineWidth(2);
+  plot1.setNeedPlotLine(false);
+  plot1.render( plot_data );
+
+  plot2.setPlotLineColor( cv::Scalar( 255, 255, 255 ) );
+  plot2.setPlotLineWidth(2);
+  plot2.setNeedPlotLine(false);
+  plot2.render( plot_result );
+  
+  cv::Mat gray_result;
+  cv::cvtColor(plot_result, gray_result, CV_BGR2GRAY);
+  writeFITS(gray_result, "../gray_result.fits");
+*/
+
+/*
+  cv::namedWindow( "Display window", cv::WINDOW_AUTOSIZE );// Create a window for display.
+  cv::imshow( "Display window", plot_data );                   // Show our image inside it.
+  cv::namedWindow( "Display window2", cv::WINDOW_AUTOSIZE );// Create a window for display.
+  cv::imshow( "Display window2", plot_result );                   // Show our image inside it.
+  cv::waitKey();
+*/
+}
+
+
+bool test_NoiseEstimator()
+{
+  //Benchmark
+  cv::Mat img, dat;
+  readFITS("../inputs/surfi000.fits", dat);
+  dat.convertTo(img, cv::DataType<double>::type);
+  cv::normalize(img, img, 0.0, 1.0, CV_MINMAX);
+  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
+
+  //transfor to fourier domain and brings energy to the center
+  cv::Mat D;
+  cv::dft(img, D, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  fftShift(D);
+
+  //remove frequencies beyond cutoff
+  OpticalSetup tsettings(D.cols);
+  Zernike zrnk;
+  D.setTo(0, zrnk.phaseMapZernike(1, D.cols, tsettings.cutoffPixel()) == 0);
+  
+  //Take back to image domain the remaing frequencies
+  fftShift(D);
+  cv::idft(D, img, cv::DFT_REAL_OUTPUT);
+  
+  //add gaussian noise
+  cv::Mat noise(img.size(), cv::DataType<double>::type);
+  cv::Scalar sigma(0.29), mean(0);
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
+  cv::randn(noise, mean, sigma);
+  cv::add(img, noise, img);
+
+  //estimate the noise
+  NoiseEstimator ne;
+  ne.meanPowerSpectrum(img);
+
+  std::cout << "Mean power: " << ne.meanPower() << std::endl;
+  std::cout << "Sigma: " << ne.sigma() << std::endl;
+  std::cout << "Sigma 2: " << ne.sigma2() << std::endl;
+  return true;
+}
 
 //cv::randn(cv::Mat a, cv::Mat mean, cv::Mat std)
 //fill matrix a with random values from normal distribution with mean vector and std matrix
@@ -39,6 +240,112 @@ cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize)
   }
   return A;
 }
+
+bool test_minimization()
+{
+ 
+  ConvexOptimization mm;
+  
+  //write in wolfram alpha the following to verify: "minimize{x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z^2} in x+2*y+3*z=0"
+  double ce_dat[] = {1.0, 2.0, 3.0};
+  cv::Mat ce(1,3,cv::DataType<double>::type,ce_dat), Q, R;
+  householder(ce.t(), Q, R);
+  int numberOfUnkowns(3);
+  int Np = numberOfUnkowns - ce.rows;
+  cv::Mat Q2 = Q(cv::Range::all(), cv::Range(Q.cols - Np, Q.cols ));
+  std::cout << "Q2: " << Q2 << std::endl;
+  
+  std::function<double(cv::Mat)> funcc = [] (cv::Mat x) -> double 
+  {//Eq to minimize: x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z
+    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
+           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5) + 3 * std::pow(x.at<double>(2,0),2);
+  };
+  
+  std::function<cv::Mat(cv::Mat)> dfuncc_diff = [funcc] (cv::Mat x) -> cv::Mat
+  { //make up gradient vector through slopes and tiny differences
+    double EPS(1.0e-4);
+    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
+    for(unsigned int j = 0; j < x.total(); ++j)
+    {
+    	cv::Mat xh = x.clone();
+      cv::Mat xl = x.clone();
+
+      xh.at<double>(j,0) = xh.at<double>(j,0) + EPS;
+      xl.at<double>(j,0) = xl.at<double>(j,0) - EPS;
+      
+      double fh = funcc(xh);
+      double fl = funcc(xl);
+      
+      df.at<double>(j,0) = (fh-fl)/(2.0*EPS);
+    }
+    return df;
+    
+  };
+  
+  
+  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat x) -> cv::Mat
+  { //Gradient vector function: function derivative with every variable
+    cv::Mat t(3,1, cv::DataType<double>::type);  //Size(3,1)->1 row, 2 colums
+    t.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
+                            std::pow(x.at<double>(0,0)+3,4);
+    t.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
+                            std::pow(x.at<double>(1,0)+4,5);
+    t.at<double>(2,0) = 6 * x.at<double>(2,0);
+    return t;
+  };
+ 
+  
+
+  cv::Mat x0_conv = cv::Mat::zeros(3, 1, cv::DataType<double>::type);   //reset starting point
+    
+  //Lambda function that turn minimize function + constraints problem into minimize function lower dimension problem
+  auto F_constrained = [] (cv::Mat x, std::function<double(cv::Mat)> func, const cv::Mat& Q2) -> double
+  {
+    return func(Q2*x);
+  };
+    
+  auto DF_constrained = [] (cv::Mat x, std::function<cv::Mat(cv::Mat)> dfunc, const cv::Mat& Q2) -> cv::Mat
+  {
+    return Q2.t() * dfunc(Q2*x);
+  };
+      
+  std::function<double(cv::Mat)> f_constrained = std::bind(F_constrained, std::placeholders::_1, funcc, Q2);
+  std::function<cv::Mat(cv::Mat)> df_constrained = std::bind(DF_constrained, std::placeholders::_1, dfuncc_diff, Q2);
+  //Define a new starting point with lower dimensions after reduction with contraints
+  cv::Mat p_constrained = Q2.t() * x0_conv;
+
+  mm.perform_BFGS(p_constrained, f_constrained, df_constrained);
+  
+  x0_conv = Q2 * p_constrained;   //Go back to original dimensional 
+
+  std::cout << "mimumum: " << x0_conv.t() << std::endl;
+
+  
+  return true;
+}
+
+bool test_minQ2()
+{
+  //there are 4 parameters. The first is double than the third. The last should be zero
+  double ce_dat[] = {1.0, 0.0, -1.0, 0.0};
+  cv::Mat ce(1,4,cv::DataType<double>::type,ce_dat), Q, R;
+  householder(ce.t(), Q, R);
+  int numberOfUnkowns(4);
+  int Np = numberOfUnkowns - ce.rows;
+  cv::Mat Q2 = Q(cv::Range::all(), cv::Range(Q.cols - Np, Q.cols ));
+  std::cout << "Q2: " << Q2 << std::endl;
+  cv::Mat bias = cv::Mat::zeros(4, 1, cv::DataType<double>::type);
+  bias.at<double>(2, 0) = -2.0;
+  cv::Mat p_constrained = cv::Mat::ones(3, 1, cv::DataType<double>::type);
+  cv::Mat x0_conv = (Q2 * p_constrained) + bias;   //Go back to original dimensional 
+  std::cout << "x cons: " << x0_conv << std::endl;
+  
+  p_constrained = (x0_conv.t() - bias.t()) * Q2;
+  std::cout << "x uncons: " << p_constrained << std::endl;
+  
+  return true;
+}
+
 
 void test_SparseRecovery()
 {
@@ -127,9 +434,15 @@ bool test_BSL()
   cv::Mat ny(3, 1, cv::DataType<double>::type, y_array);
   
   //OptAlg
-  //cv::Mat res = perform_BSBL(nPhi, ny, NoiseLevel::Noiseless, blkLen);
-  //cv::Mat res2 = perform_IHT(nPhi, ny, 2);
   std::vector<double> gamma_v(3, 1.0);
+  std::cout << "blkLen: " << blkLen << std::endl;
+  std::cout << "nPhi: " << nPhi << std::endl;
+  std::cout << "ny: " << ny << std::endl;
+  cv::Mat res = perform_BSBL(nPhi, ny, NoiseLevel::Noiseless, gamma_v, blkLen);
+  //cv::Mat res2 = perform_IHT(nPhi, ny, 2);
+  
+  
+/*  
   for(unsigned int i=0;i<1;++i)
   {
     //gamma_v = std::vector<double>(3, 1.0);
@@ -138,12 +451,73 @@ bool test_BSL()
     std::cout << "res: " << res.t() << std::endl;
     //std::cout << "res2: " << res2.t() << std::endl;
   }
-  
+*/  
 
   return true;
 }
 
+bool test_zernikes()
+{
+  cv::Mat Z5;
+  double r_c(400.0);
+  int side_l(1000);
+  int z_max(10);
+  std::shared_ptr<Zernike> zrnk = std::make_shared<Zernike>(r_c, side_l, z_max);
 
+  unsigned int count_a(1);
+  for(auto za : zrnk->base())
+  {
+    unsigned int count_b(1);
+    for(auto zb : zrnk->base())
+    {
+      double za_l2 = cv::norm(za, cv::NORM_L2);
+      double zb_l2 = cv::norm(zb, cv::NORM_L2);
+      
+      double inner_prod = za.dot(zb)/(za_l2*zb_l2);
+      std::cout << "inner_prod: " << count_a << " con " << count_b << " -> " << inner_prod << std::endl;
+      count_b++;
+    }
+    count_a++;
+  }
+  return true;
+}
+
+
+void test_covarianceMatrix()
+{
+  /*
+  cv::Mat_<float> samples = (cv::Mat_<float>(4, 2) << 500.0, 500.0,
+                                              355.8, 355.8,
+                                              498.7, 498.7,
+                                              123.4, 123.4 );
+  
+  */
+  
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
+  cv::RNG& rng = cv::theRNG();
+  
+  cv::Mat_<float> samples;
+  
+  for(unsigned int i=0;i<100000000;++i)
+  {
+    float val1 = rng.uniform(0.0, 1000.0);
+    float val2 = rng.uniform(0.0, 1000.0);
+    cv::Mat s = ( cv::Mat_<float>(1, 2) << val1, 234.4 );
+    samples.push_back( s );
+  }
+  
+  cv::Mat cov, mu;
+  cv::calcCovarMatrix(samples, cov, mu, CV_COVAR_NORMAL | CV_COVAR_ROWS);
+  
+  cov = cov / (samples.rows - 1);
+  
+  std::cout << "cov: " << std::endl;
+  std::cout << cov << std::endl;
+  
+  std::cout << "mu: " << std::endl;
+  std::cout << mu << std::endl;
+
+}
 
 /*
 void test_nonlinearCompressedSensing()
@@ -332,77 +706,15 @@ void test_udwd_spectrums()
   std::cout << "Energy difference: " << std::sqrt(cv::sum(diff.mul(diff)).val[0]) << std::endl;  
 }
 
-
-bool test_minimization()
-{
- 
-  ConvexOptimization mm;
-  
-  //write in wolfram alpha the following to verify: "minimize{x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z^2} in x+2*y+3*z=0"
-     
-  double q2[] = {-0.53452248, -0.80178373, 0.77454192, -0.33818712,  -0.33818712,  0.49271932};    //null space of constraints: subject to x+2y+3z=0
-  cv::Mat Q2 = cv::Mat(3, 2, cv::DataType<double>::type, q2);
-  
-  std::function<double(cv::Mat)> funcc = [] (cv::Mat x) -> double 
-  {//Eq to minimize: x^8-3*(x+3)^5+5+(y+4)^6+y^5+3*z
-    return std::pow(x.at<double>(0,0),8) - 3 * std::pow(x.at<double>(0,0)+3,5) + 5 + 
-           std::pow(x.at<double>(1,0)+4,6)+ std::pow(x.at<double>(1,0),5) + 3 * std::pow(x.at<double>(2,0),2);
-  };
-  
-  std::function<cv::Mat(cv::Mat)> dfuncc_diff = [funcc] (cv::Mat x) -> cv::Mat
-  { //make up gradient vector through slopes and tiny differences
-    double EPS(1.0e-8);
-    cv::Mat df = cv::Mat::zeros(x.size(), x.type());
-  	cv::Mat xh = x.clone();
-	  double fold = funcc(x);
-    for(unsigned int j = 0; j < x.total(); ++j)
-    {
-      double temp = x.at<double>(j,0);
-      double h = EPS * std::abs(temp);
-      if (h == 0) h = EPS;
-      xh.at<double>(j,0) = temp + h;
-      
-      h = xh.at<double>(j,0) - temp;
-      double fh = funcc(xh);
-      xh.at<double>(j,0) = temp;
-      df.at<double>(j,0) = (fh-fold)/h;    
-    }
-    return df;
-    
-  };
-  
-  
-  std::function<cv::Mat(cv::Mat)> dfuncc = [] (cv::Mat x) -> cv::Mat
-  { //Gradient vector function: function derivative with every variable
-    cv::Mat t(3,1, cv::DataType<double>::type);  //Size(3,1)->1 row, 2 colums
-    t.at<double>(0,0) = 8 * std::pow(x.at<double>(0,0),7) - 15 * 
-                            std::pow(x.at<double>(0,0)+3,4);
-    t.at<double>(1,0) = 5 * std::pow(x.at<double>(1,0),4) + 6 * 
-                            std::pow(x.at<double>(1,0)+4,5);
-    t.at<double>(2,0) = 6 * x.at<double>(2,0);
-    return t;
-  };
- 
-  
-  cv::Mat p = cv::Mat::zeros(3, 1, cv::DataType<double>::type);
-  mm.minimize(p, Q2, funcc, dfuncc_diff);
-  
-  std::cout << "p " << p << std::endl;
-  std::cout << "fret " << mm.fret() << std::endl;
-  
-  return true;
-}
-
-
-
 void test_generizedPupilFunctionVsOTF()
 {
   double diversityFactor_ = -2.21209;
   constexpr double PI = 2*acos(0.0);
   double c4 = diversityFactor_ * PI/(2.0*std::sqrt(3.0));
-  cv::Mat z4 = BasisRepresentation::phaseMapZernike(4, 128, 50);
+  Zernike zrnk;
+  cv::Mat z4 = zrnk.phaseMapZernike(4, 128, 50);
   double z4AtOrigen = z4.at<double>(z4.cols/2, z4.rows/2);
-  cv::Mat pupilAmplitude = BasisRepresentation::phaseMapZernike(1, 128, 50);
+  cv::Mat pupilAmplitude = zrnk.phaseMapZernike(1, 128, 50);
   cv::Mat c = cv::Mat::zeros(14, 1, cv::DataType<double>::type);
   c.at<double>(0,3) = 0.8;
   c.at<double>(0,4) = 0.3;
@@ -415,8 +727,8 @@ void test_generizedPupilFunctionVsOTF()
   c1.at<double>(0,6) = 0.9;
   c1.at<double>(0,10) = 0.42;
 
-  cv::Mat focusedPupilPhase = BasisRepresentation::phaseMapZernikeSum(128, 50, c);
-  cv::Mat focusedPupilPhase1 = BasisRepresentation::phaseMapZernikeSum(128, 50, c1);
+  cv::Mat focusedPupilPhase = zrnk.phaseMapZernikeSum(128, 50, c);
+  cv::Mat focusedPupilPhase1 = zrnk.phaseMapZernikeSum(128, 50, c1);
 
   cv::Mat defocusedPupilPhase = focusedPupilPhase + c4*(z4-z4AtOrigen);
   cv::Mat defocusedPupilPhase1 = focusedPupilPhase1 + c4*(z4-z4AtOrigen);
@@ -453,7 +765,8 @@ void test_wavelet_zernikes_decomposition()
 void test_zernike_wavelets_decomposition()
 {
   std::vector<cv::Mat> vCat;
-  std::map<unsigned int, cv::Mat> cat = BasisRepresentation::buildCatalog(20, 200, 200/2);
+  Zernike zrnk;
+  std::map<unsigned int, cv::Mat> cat = zrnk.buildCatalog(20, 200, 200/2);
   std::vector<cv::Mat> wavelet_planes;
   cv::Mat residu;
   unsigned int count(0);
@@ -604,16 +917,6 @@ void test_divComplex()
 
 }
 
-bool test_zernikes()
-{
-
-  cv::Mat mask = BasisRepresentation::phaseMapZernike(1,128*8,128*4);
-  cv::imshow("mask",mask);
-  cv::waitKey();
-  cv::imwrite("mask.ppm",mask);
-  return true;
-}
-
 void test_phaseMapZernikeSum()
 {
   double data[] = {0, 0, 0, -0.2207034660012752, -0.2771620624276502, -0.451531165841092,
@@ -622,12 +925,13 @@ void test_phaseMapZernikeSum()
   int n = sizeof(data) / sizeof(data[0]);
   cv::Mat coeffs(n, 1, CV_64FC1, data);
   std::cout << "coeffs: " << coeffs << std::endl;
-  cv::Mat phaseMapSum = BasisRepresentation::phaseMapZernikeSum(136/2, 32.5019, coeffs);
+  Zernike zrnk;
+  cv::Mat phaseMapSum = zrnk.phaseMapZernikeSum(136/2, 32.5019, coeffs);
   std::cout << "phaseMapSum.at<double>(30,30): " << phaseMapSum.at<double>(40,40) << std::endl;
 
   for(unsigned int i=4;i<=10;++i)
   {
-    cv::Mat zern = BasisRepresentation::phaseMapZernike(i, 136/2, 32.5019);
+    cv::Mat zern = zrnk.phaseMapZernike(i, 136/2, 32.5019);
     cv::normalize(zern, zern, 0, 1, CV_MINMAX);
     writeOnImage(zern, std::to_string(i));
     cv::imshow(std::to_string(i), zern);
@@ -703,9 +1007,10 @@ void test_getNM()
 {
   unsigned int N;
   int M;
+  Zernike zrnk;
   for(unsigned int j=1; j<=10; ++j)
   {
-    BasisRepresentation::getNM(j,N,M);
+    zrnk.getNM(j,N,M);
     std::cout << "Zernike Index: " << j << "; N: " << N << "; M: " << M << std::endl;
   }
 }
@@ -728,29 +1033,6 @@ void test_flip()
   std::cout << "A(1,1): " << s.at<std::complex<float> >(1,1) << std::endl;
   std::cout << "A flipped shifted: " << std::endl << s << std::endl;
 
-}
-
-void test_NoiseEstimator()
-{
-  cv::Mat img;
-  readFITS("/home/dailos/PDPairs/12-06-2013/pd.007.fits", img);
-
-  cv::Rect rect0(0,0,128,128);
-  cv::Rect rectk(936,0,128,128);
-
-  cv::Mat d0 = cv::Mat_<float>(img(rect0).clone());
-  cv::Mat dk = cv::Mat_<float>(img(rectk).clone());
-
-  NoiseEstimator neFocused, neDefocused;
-
-  neFocused.meanPowerSpectrum(d0);
-  neDefocused.meanPowerSpectrum(dk);
-  //double sigma0 = neFocused.noiseSigma();
-  //double sigmak = neDefocused.noiseSigma();
-  double avgPower0 = neFocused.meanPower();
-  double avgPowerk = neDefocused.meanPower();
-
-  std::cout << "gamma noise: " << avgPower0 << "/" << avgPowerk << " = " << avgPower0/avgPowerk << std::endl;
 }
 
 void test_ErrorMetric()

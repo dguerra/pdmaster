@@ -7,7 +7,7 @@
 
 #include "WavefrontSensor.h"
 //#include "CustomException.h"
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 //#include <cmath>
 #include "ToolBox.h"
 #include "OpticalSetup.h"
@@ -39,30 +39,33 @@ WavefrontSensor::~WavefrontSensor()
 
 
 cv::Mat
-WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vector<double>& meanPowerNoise)
+WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const double& meanPowerNoise)
 {
   unsigned int numberOfZernikes = 20;   //total number of zernikes to be considered
   int M = numberOfZernikes;
   int K = d.size();
   cv::Mat Q2;
+  //We introduce here the lineal relationship between parameter phases of each optical path
   partlyKnownDifferencesInPhaseConstraints(M, K, Q2);
   std::vector<cv::Mat> Q2_v = {Q2, cv::Mat::zeros(Q2.size(), Q2.type())};
   cv::Mat LEC;   //Linear equality constraints
   cv::merge(Q2_v, LEC);   //Build also the complex version of Q2
-
   //process each patch independently
   cv::Mat dd;
   std::vector<cv::Mat> d_w;
   std::vector<Metric> mtrc_v;
   std::vector<std::pair<cv::Range,cv::Range> > rngs;
   unsigned int pixelsBetweenTiles = (int)(d.front().cols);
+  
   unsigned int tileSize = 34;
   OpticalSetup tsettings( tileSize );
+  std::shared_ptr<Zernike> zrnk = std::make_shared<Zernike>(tsettings.pupilRadiousPixels(), tileSize, numberOfZernikes);
   divideIntoTiles(d.front().size(), pixelsBetweenTiles, tileSize, rngs);
   //Random row selector: Pick incoherent measurements
+  
+  
   cv::Mat eye_nn = cv::Mat::eye(K*tileSize*tileSize, K*tileSize*tileSize, cv::DataType<double>::type);
-  //unsigned int a = 228; //number of incoherent non-adaptive measurements
-  unsigned int a = 400; // 42; //number of incoheren measurements
+  unsigned int a = 400; //number of incoheren measurements
   cv::Mat shuffle_eye;
   shuffleRows(eye_nn, shuffle_eye);
   
@@ -72,20 +75,8 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   cv::Mat A;
   cv::merge(A_v, A);
   
-/*
-  //Sensing matrix: Normalized random basis
-  auto random_basis = []() -> void
-  {
-    cv::Mat Psi(M, N, cv::DataType<double>::type);
-    cv::randn(Psi, cv::Scalar(1.0), cv::Scalar(1.0));
-    cv::Mat Psi_norm;
-    cv::multiply(Psi, Psi, Psi_norm);
-    cv::reduce(Psi_norm, Psi_norm, 0, CV_REDUCE_SUM);   //sum every column a reduce matrix to a single row
-    cv::sqrt(Psi_norm, Psi_norm);
-    cv::divide(Psi, cv::Mat::ones(M,1,cv::DataType<double>::type) * Psi_norm, Psi);
-  }
-*/
-
+  std::cout << "Number of anisoplanatic patches to annalize at once: " << rngs.size() << std::endl;
+  
   for(auto rng_i : rngs)
   {
     cv::Mat d_col;
@@ -105,7 +96,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
     cv::gemm(A, d_col, 1.0, cv::Mat(), 1.0, d_col);  //Picks rows randomly
     
     d_w.push_back( d_col );
-    mtrc_v.push_back( Metric(D, tsettings.pupilRadiousPixels(), numberOfZernikes) );
+    mtrc_v.push_back( Metric(D, zrnk, meanPowerNoise) );
   }
   cv::vconcat(d_w, dd);
   
@@ -115,8 +106,9 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   {
   for(auto mtrc : mtrc_v)
   {
-    std::function<double(cv::Mat)> func = std::bind(&Metric::objective, &mtrc, std::placeholders::_1, meanPowerNoise);
-    std::function<cv::Mat(cv::Mat)> dfunc = std::bind(&Metric::gradient, &mtrc, std::placeholders::_1, meanPowerNoise);
+    std::function<double(cv::Mat)> func = std::bind(&Metric::objective, &mtrc, std::placeholders::_1);
+    std::function<cv::Mat(cv::Mat)> dfunc = std::bind(&Metric::gradient, &mtrc, std::placeholders::_1);
+    
     ConvexOptimization minimizationKit;
     cv::Mat x0_conv = cv::Mat::zeros(M*K, 1, cv::DataType<double>::type);   //reset starting point
     
@@ -143,10 +135,15 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
   }
   std::cout << "END OF CONVEX OPTIMIZATION"  << std::endl;
   }
-  
+
   
   //-----------------------BY MEANS OF SPARSE RECOVERY:
-  cv::Mat x0 = cv::Mat::zeros(rngs.size()*M*K, 1, cv::DataType<double>::type);   //x0: initial point
+  //Create phase_div bias: only for the case of two diversity images!!
+//  cv::Mat phase_div = cv::Mat::zeros(rngs.size()*M*K, 1, cv::DataType<double>::type);
+//  phase_div.at<double>(M + 3, 0) = tsettings.k() * 3.141592/(2.0*std::sqrt(3.0));
+  
+  cv::Mat x0 = cv::Mat::zeros(rngs.size()*M*K, 1, cv::DataType<double>::type); //Starting point
+  
   std::vector<double> gamma_v(M*K, 1.0);
   for(unsigned int count=0;count<600;++count)
   {
@@ -159,14 +156,14 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
     for(unsigned int t=0; t < rngs.size(); ++t)
     {
       cv::Mat jacob_i;
-      mtrc_v.at(t).jacobian( x0(cv::Range(t*M*K, (t*M*K) + (M*K)), cv::Range::all()), meanPowerNoise, jacob_i );
+      mtrc_v.at(t).jacobian( x0(cv::Range(t*M*K, (t*M*K) + (M*K)), cv::Range::all()), jacob_i );
       cv::gemm(A, jacob_i, 1.0, cv::Mat(), 1.0, jacob_i);   //Picks rows randomly
       cv::gemm(jacob_i, LEC, 1.0, cv::Mat(), 1.0, jacob_i);  //Apply constraints LECs
       cv::copyMakeBorder(blockMatrix_M, blockMatrix_M, 0, jacob_i.size().height, 0, jacob_i.size().width, cv::BORDER_CONSTANT, cv::Scalar(0.0, 0.0) );
       cv::Rect rect(cv::Point(t*jacob_i.size().width, t*jacob_i.size().height), jacob_i.size() );
       jacob_i.copyTo(blockMatrix_M( rect ));
       cv::Mat De_i;
-      mtrc_v.at(t).phi( x0(cv::Range(t*M*K, (t*M*K) + (M*K)), cv::Range::all()), meanPowerNoise, De_i );
+      mtrc_v.at(t).phi( x0(cv::Range(t*M*K, (t*M*K) + (M*K)), cv::Range::all()), De_i );
       cv::gemm(A, De_i, 1.0, cv::Mat(), 1.0, De_i);   //Picks rows randomly
       De_v.push_back( De_i );
     }
@@ -180,18 +177,11 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
     unsigned int blkLen = rngs.size();
     cv::Mat blockMatrix_M_r;
     reorderColumns(blockMatrix_M, M, blockMatrix_M_r);   //reorder columns so correlated data form a single block
-    //std::cout << "blockMatrix_M.row(25): " << blockMatrix_M.row(25) << std::endl;
-    //std::cout << "blockMatrix_M_r.row(25): " << blockMatrix_M_r.row(25) << std::endl;
-    //LittleNoise, Noiseless, Noisy
+
     gamma_v = std::vector<double>(M*K, 1.0);
-    cv::Mat coeffs = perform_BSBL(blockMatrix_M_r, dd - De, NoiseLevel::Noiseless, gamma_v, blkLen);
-    //cv::Mat coeffs = perform_BSBL(blockMatrix_M_r, dd - De, NoiseLevel::LittleNoise, gamma_v, blkLen);
-    //cv::Mat coeffs = perform_BSBL(blockMatrix_M_r, dd - De, NoiseLevel::Noisy, blkLen);
-    //cv::Mat coeffs = perform_IHT (blockMatrix_M_r, dd - De, 4);
-    //cv::Mat coeffs = perform_FISTA (blockMatrix_M_r, dd - De, 0.0000001);  //defautl:0.000001
-    //cv::Mat coeffs = perform_projection(blockMatrix_M_r, dd - De);
-    
-    
+    //cv::Mat coeffs = perform_BSBL(blockMatrix_M_r, dd - De, NoiseLevel::Noiseless, gamma_v, blkLen);  //Noiseless, LittleNoise
+    //cv::Mat coeffs = perform_SBL(blockMatrix_M_r, dd - De, NoiseLevel::Noiseless, gamma_v);  //Noiseless, LittleNoise
+    cv::Mat coeffs = perform_projection(blockMatrix_M_r, dd - De);  //Noiseless, LittleNoise
     cv::Mat coeffs_r;
     reorderColumns(coeffs.t(), blockMatrix_M.cols/M, coeffs_r);
     
@@ -207,7 +197,7 @@ WavefrontSensor::WavefrontSensing(const std::vector<cv::Mat>& d, const std::vect
     }
     
     std::cout << "cv::norm(sol): " << cv::norm(sol) << std::endl;
-    if(cv::norm(sol) < 1e-6 ) {std::cout << "Solution found" << std::endl; break;}
+    if(cv::norm(sol) < 1e-4 ) {std::cout << "Solution found" << std::endl; break;}
     x0 = x0 - sol;
     
     std::cout << "Solution number: " << count << std::endl;

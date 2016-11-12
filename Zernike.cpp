@@ -1,12 +1,12 @@
 //============================================================================
-// Name        : BasisRepresentation.cpp
+// Name        : Zernike.cpp
 // Author      : Dailos
 // Version     :
 // Copyright   : Your copyright notice
 // Description : Hello World in C++, Ansi-style
 //============================================================================
 
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 #include "ToolBox.h"
 #include "FITS.h"
 #include <iostream>
@@ -16,42 +16,70 @@
 #include "CustomException.h"
 #include "OpticalSetup.h"
 
-//Rename as Representation, Rprsnttn, DictionaryBase, BasisRepresentation
+//Rename as Representation, Rprsnttn, DictionaryBase, Zernike
 
 using namespace std;
 const double PI = 3.141592653589793238462643383279502884197169399375105;
 
-//The default constructor of the BasisRepresentation class
-BasisRepresentation::BasisRepresentation()
+Zernike::Zernike(const double& r_c, const int& nph, const int& z_max) :
+  radious_px_(r_c), side_px_(nph), base_(z_max)
 {
-//  setNameMap_();
+  cv::Mat c_mask;
+  circular_mask(radious_px_, side_px_, c_mask);
+  cv::Scalar c_area = cv::sum(c_mask);
+  //cv::divide(c_mask, c_area, c_mask);
+  for(unsigned int j=0;j<z_max;++j)
+  {
+    if(false)
+    {
+      polynomial(radious_px_, side_px_, j + 1, base_.at(j));
+      cv::multiply(base_.at(j), c_mask, base_.at(j));
+      //Be aware that RMS value should be normalized to one!!
+      double l2 = cv::norm(base_.at(j), cv::NORM_L2);
+      cv::multiply(base_.at(j), l2/std::sqrt(c_area.val[0]), base_.at(j));
+    }
+    else
+    {
+      base_.at(j) = phaseMapZernike(j + 1, side_px_, radious_px_).clone();
+    }
+  }
 }
 
-//Constructor with a vector of Zernike coeficients.
-BasisRepresentation::BasisRepresentation
-(const std::map<unsigned int, double>& zernikeCoefs)
+//The default constructor of the Zernike class
+Zernike::Zernike()
 {
-  zernikeCoefs_ = zernikeCoefs;
-//  setNameMap_();
 }
 
 //analysis operator: action analyse; takes the phase signal and gives the sequence of coefficients (representation realm)
 //from phase signal space to zernike representation
-cv::Mat BasisRepresentation::zernike_analysis(const unsigned int& sideLength, const double& radiousLength, const cv::Mat& phase_signal)
+void Zernike::analyse(const cv::Mat& sig, cv::Mat& z_coeffs)
 {
-  unsigned int zernike_max = 50;
-  cv::Mat_<double> zernike_coeffs;
-  double area = cv::sum( circular_mask(radiousLength, sideLength) ).val[0];
-  for(unsigned int j=1; j<=zernike_max; ++j)
+  z_coeffs.release();
+  for(cv::Mat z_j : base_)
   {
-    zernike_coeffs.push_back( phase_signal.dot(phaseMapZernike(j, sideLength, radiousLength, true, true) )/area  );
+    double l2 = cv::norm(z_j, cv::NORM_L2);
+    double inner_prod = z_j.dot(sig)/(l2*l2);
+    z_coeffs.push_back( inner_prod );
   }
-  return zernike_coeffs;
+}
+
+void Zernike::synthesize(const cv::Mat& z_coeffs, cv::Mat& sig)
+{
+  if(z_coeffs.cols != 1) throw CustomException("Coeffs must be single column matrix.");
+  if(z_coeffs.rows > base_.size()) throw CustomException("Number of coeffs greater than zernike base.");
+  sig = cv::Mat::zeros(side_px_, side_px_, cv::DataType<double>::type);
+  auto coeffs_it = z_coeffs.begin<double>();
+  for(cv::Mat z_j : base_)
+  {
+     if(coeffs_it == z_coeffs.end<double>()) break;
+     if(*coeffs_it != 0.0) sig += (*coeffs_it) * z_j;
+     coeffs_it++;
+  }
 }
 
 //synthesis operator: action synthesize; takes the sequence of coefficients (representation realm) and gives the phase signal
 //Rename as zernike_synthesis: from zernike representation to phase signal space
-cv::Mat BasisRepresentation::phaseMapZernikeSum(const unsigned int& sideLength, const double& radiousLength, const cv::Mat& coeffs)
+cv::Mat Zernike::phaseMapZernikeSum(const unsigned int& sideLength, const double& radiousLength, const cv::Mat& coeffs)
 {
   if(coeffs.cols == 1 && coeffs.type() == cv::DataType<double>::type)
   {
@@ -70,11 +98,11 @@ cv::Mat BasisRepresentation::phaseMapZernikeSum(const unsigned int& sideLength, 
   }
   else
   {
-    throw CustomException("BasisRepresentation: coeffs is single column vector of doubles.");
+    throw CustomException("Zernike: coeffs is single column vector of doubles.");
   }
 }
 
-void BasisRepresentation::zernike_mn(const int& j,int &m,int &n) // j=1...
+void Zernike::zernike_mn(const int& j,int &m,int &n) // j=1...
 {
   n = 0;
   int len = 1;
@@ -83,7 +111,7 @@ void BasisRepresentation::zernike_mn(const int& j,int &m,int &n) // j=1...
   m = 2 * ((dl+(n%2))/2)+!(n%2)-1;
 }
 
-cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph, const int& j)
+void Zernike::polynomial(const double& r_c, const int& nph, const int& j, cv::Mat& z_j)
 {
   double angle = 0.0;   //The angle value is set to zero by default. Use it when needed
   auto ft2dim = [](const int& x1l, const int& x1h, const int& x2l, const int& x2h) -> double **
@@ -117,11 +145,16 @@ cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph,
   };
   
   int xo=1+nph/2,yo=1+nph/2;
-  double **z=ft2dim(1,nph,1,nph);
+  
+  //Release array if necesary
+  z_j.create(nph, nph, cv::DataType<double>::type);
+  double* z = (double*)z_j.data;
+
+  
   if(j==1)
   {
     for(int x=1;x<=nph;++x)
-      for(int y=1;y<=nph;++y) z[x][y] = 1.0;
+      for(int y=1;y<=nph;++y) z[(x-1)*nph + (y-1)] = 1.0;
   }
   else
   {                                       // j>1
@@ -137,7 +170,7 @@ cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph,
         double rr=std::sqrt((double)std::pow(x-xo, 2.0)+(double)std::pow(y-yo, 2.0))/r_c; 
         rs[x][y]=rr*rr;
         r[x][y]=pow(rr,n);
-        z[x][y]=r[x][y]*rc[0];
+        z[(x-1)*nph + (y-1)]=r[x][y]*rc[0];
       }
     }
     rs[xo][yo]=1.0;                           // avoid divide by 0
@@ -147,10 +180,10 @@ cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph,
       {
         for(int y=1;y<=nph;++y)
         {  
-          z[x][y]+=(r[x][y]/=rs[x][y])*rc[s];
+          z[(x-1)*nph + (y-1)]+=(r[x][y]/=rs[x][y])*rc[s];
         }
       }  
-      if(!(n-2*s)) z[xo][yo]+=rc[s];          // dividing 0 by 1 will never give 1...
+      if(!(n-2*s)) z[(xo-1)*nph + (yo-1)]+=rc[s];          // dividing 0 by 1 will never give 1...
     }
     del_ft2dim(rs,1,nph,1,nph);
     del_ft2dim(r,1,nph,1,nph);
@@ -161,14 +194,14 @@ cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph,
       {   // odd
         for(int x=1;x<=nph;++x)
         {
-          for(int y=1;y<=nph;++y) z[x][y]*=sf*std::sin(((double)m)*(std::atan2((double)(y-yo),(double)(x-xo))+angle));
+          for(int y=1;y<=nph;++y) z[(x-1)*nph + (y-1)]*=sf*std::sin(((double)m)*(std::atan2((double)(y-yo),(double)(x-xo))+angle));
         }
       }
       else                                    // even
       {
         for(int x=1;x<=nph;++x)
         {
-          for(int y=1;y<=nph;++y) z[x][y]*=sf*std::cos(((double)m)*(std::atan2((double)(y-yo),(double)(x-xo))+angle));
+          for(int y=1;y<=nph;++y) z[(x-1)*nph + (y-1)]*=sf*std::cos(((double)m)*(std::atan2((double)(y-yo),(double)(x-xo))+angle));
         }
       }
     }
@@ -177,16 +210,16 @@ cv::Mat BasisRepresentation::zernike_function(const double& r_c, const int& nph,
       double sf=std::sqrt((double)(n+1.0));   //CHANGE!
       for(int x=1;x<=nph;++x)
       {
-        for(int y=1;y<=nph;++y) z[x][y]*=sf;
+        for(int y=1;y<=nph;++y) z[(x-1)*nph + (y-1)]*=sf;
       }
     }
     delete[] rc;
   }
   
-  return cv::Mat(cv::Size(nph, nph), cv::DataType<double>::type, &z[1][1]);  //c-like array starts at position (1,1)
+//  return cv::Mat(cv::Size(nph, nph), cv::DataType<double>::type, &z[1][1]);  //c-like array starts at position (1,1)
 }
 
-double BasisRepresentation::zernike_covar(int i,int j)
+double Zernike::zernike_covar(int i,int j)
 {
   auto gammln = [](double xx, double &sign)-> double
   {
@@ -237,22 +270,13 @@ double BasisRepresentation::zernike_covar(int i,int j)
   return k * std::exp(g1 - g2 - g3 - g4) * g1_sgn * g2_sgn * g3_sgn * g4_sgn;
 }
 
-cv::Mat BasisRepresentation::circular_mask(const double& r_c, const int& nph)
+void Zernike::circular_mask(const double& r_c, const int& nph, cv::Mat& c_mask)
 {
+  c_mask.create(nph, nph, cv::DataType<double>::type);
+  double* z = (double*)c_mask.data;
+
   //Circular mask: zero-valued outside the cicle, one-valued inside, 
   //the edge pixels has values between 0 and 1 depending on how far lies the center of the pixel from the edge
-  auto ft2dim = [](const int& x1l, const int& x1h, const int& x2l, const int& x2h) -> double **
-  {
-    int nx1=x1h-x1l+1,nx2=x2h-x2l+1;
-    double **p;
-    p=new double* [nx1] - x1l;
-    p[x1l] = new double [nx1*nx2] - x2l;
-    for(int x1=x1l+1;x1<=x1h;++x1) p[x1]=p[x1-1]+nx2;
-    return p;
-  };
-  
-  double **z = ft2dim(1,nph,1,nph);
-  
   int xo=1+nph/2,yo=1+nph/2;
   double rcs=r_c*r_c,dx=0.5/r_c,dy=0.5/r_c;
   for(int x=1;x<=nph;++x){
@@ -267,7 +291,7 @@ cv::Mat BasisRepresentation::circular_mask(const double& r_c, const int& nph)
       {      // inside pixel
         if(rsh<1.0)      // full pixel
         {
-          z[x][y] = 1.0;
+          z[(x-1)*nph + (y-1)] = 1.0;
         }
         else
         {            // partial pixel
@@ -275,18 +299,17 @@ cv::Mat BasisRepresentation::circular_mask(const double& r_c, const int& nph)
           double y3 = std::sqrt(max(1.0-xhs,(double)0.0));
           double f = (xh>yh)?(yh-yl)*(std::min(xh,std::max(xl,x2))-xl)/(4*dx*dy):
                            (xh-xl)*(std::min(yh,std::max(yl,y3))-yl)/(4*dx*dy);
-          z[x][y] = f;
+          z[(x-1)*nph + (y-1)] = f;
         }
       }
-      else z[x][y] = 0.0; // outside pixel
+      else z[(x-1)*nph + (y-1)] = 0.0; // outside pixel
     }
   }
  
-  return cv::Mat(cv::Size(nph, nph), cv::DataType<double>::type, &z[1][1]);  //c-like array starts at position (1,1);
 }
 
 
-cv::Mat BasisRepresentation::phaseMapZernike(const unsigned int& j, const unsigned int& sideLength, const double& radiousLength, const bool& unit_rms, const bool& c_mask)
+cv::Mat Zernike::phaseMapZernike(const unsigned int& j, const unsigned int& sideLength, const double& radiousLength, const bool& unit_rms, const bool& c_mask)
 {
   //Find the rms for this mode:
   auto rms_t = [](const cv::Mat& zf, const cv::Mat& mask) -> double
@@ -298,8 +321,10 @@ cv::Mat BasisRepresentation::phaseMapZernike(const unsigned int& j, const unsign
     return std::sqrt(rms2.val[0]);
   };
   
-  cv::Mat zz = zernike_function(radiousLength, sideLength, j);
-  cv::Mat pu = circular_mask(radiousLength, sideLength);
+  cv::Mat zz;
+  polynomial(radiousLength, sideLength, j, zz);
+  cv::Mat pu;
+  circular_mask(radiousLength, sideLength, pu);
   cv::Mat zernike_mode;
   
   if(c_mask) cv::multiply(zz, pu, zernike_mode);

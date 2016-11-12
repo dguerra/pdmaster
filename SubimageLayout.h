@@ -21,11 +21,12 @@ public:
   SubimageLayout();
   virtual ~SubimageLayout();
   // navigateThrough
+  void fromPhaseScreen();
+  void dataSimulator();
   void aberrate(const cv::Mat& img, const cv::Mat& aberrationPhase, const double& pupilRadious, const double& sigmaNoise, cv::Mat& aberratedImage);
   cv::Mat atmospheric_zernike_coeffs(const unsigned int& z_max, const double& D, const double& r0);
   void createModifiedHanningWindow(cv::Mat& modifiedHanningWindow, const int& sideLength, const double& apodizedAreaPercent, int datatype);
   void computerGeneratedImage();
-  void realData();
   //std::vector<std::tuple<std::pair<cv::Range,cv::Range>, cv::Mat, std::unique_ptr<Metric> > > tileStack_;
   std::vector<std::tuple<std::pair<cv::Range,cv::Range>, cv::Mat, Metric> > tileStack_;
   

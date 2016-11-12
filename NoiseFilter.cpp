@@ -8,7 +8,7 @@
 #include "NoiseFilter.h"
 #include "ToolBox.h"
 #include "OpticalSetup.h"
-#include "BasisRepresentation.h"
+#include "Zernike.h"
 
 
 NoiseFilter::NoiseFilter()
@@ -57,7 +57,8 @@ NoiseFilter::NoiseFilter(const cv::Mat& T0, const cv::Mat& Tk, const cv::Mat& D0
 
   //To zero-out frequencies beyond cutoff
   OpticalSetup tsettings(T0.cols);
-  H.setTo(0, BasisRepresentation::phaseMapZernike(1, H.cols, tsettings.cutoffPixel()) == 0);
+  Zernike zrnk;
+  H.setTo(0, zrnk.phaseMapZernike(1, H.cols, tsettings.cutoffPixel()) == 0);
   
   //select only the central lobe of the filter when represented in the frequency domain
   // Find total markers

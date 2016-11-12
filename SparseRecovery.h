@@ -15,6 +15,7 @@
 enum class NoiseLevel {Noiseless, LittleNoise, Noisy};
 cv::Mat perform_projection(const cv::Mat& Phi0, const cv::Mat& y0);
 cv::Mat perform_FISTA(const cv::Mat& Phi0, const cv::Mat& y0, const double& lambda);
+cv::Mat perform_SBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, std::vector<double>& gamma_v);
 cv::Mat perform_BSBL(const cv::Mat& Phi0, const cv::Mat& y0, const NoiseLevel& LearnLambda, std::vector<double>& gamma_v, const unsigned int& blkLength = 1);
 cv::Mat perform_IHT(const cv::Mat& Phi0, const cv::Mat& y0, const unsigned int& s, const double& mu = 0.0);
 bool complexToRealValued(const cv::Mat& Phi0, const cv::Mat& y0, cv::Mat& Phi, cv::Mat& y);
@@ -36,7 +37,7 @@ class Block
     //Setters
     void gamma  (const double&   gmm) {gamma_ = gmm;};
     void Sigma_0(const cv::Mat& sgm0) {sgm0.copyTo(Sigma_0_);};
-    void Sigma_x(const cv::Mat& sgmx) {Sigma_x_ = sgmx.clone();};
+    void Sigma_x(const cv::Mat& sgmx) {sgmx.copyTo(Sigma_x_);};
     void Cov_x  (const cv::Mat& covx) {covx.copyTo(Cov_x_);};
     
   private:

@@ -9,9 +9,11 @@
 #define TESTROOM_H_
 #include "opencv2/opencv.hpp"
 
+
 template<class T>
 cv::Mat createRandomMatrix(const unsigned int& xSize, const unsigned int& ySize);
-//void test_nonlinearCompressedSensing();
+void test_jacobian();
+void leastSquearesExperiment();
 bool test_BSL();
 void test_SparseRecovery();
 bool test_LinearizedBregmanAlgorithmDenoising();
@@ -27,6 +29,8 @@ void test_conv_flaw();
 void test_wavelets();
 bool test_conjComplex();
 bool test_minimization();
+bool test_minQ2();
+void test_covarianceMatrix();
 bool test_nonsmoothConvexOptimization();
 bool test_crosscorrelation();
 bool test_specular();
@@ -40,7 +44,7 @@ void test_flip();
 void test_QualityMetric();
 void test_ErrorMetric();
 void test_Optics();
-void test_NoiseEstimator();
+bool test_NoiseEstimator();
 void test_Noise();
 void test_phaseMapZernikeSum();
 void test_divComplex();
