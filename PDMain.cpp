@@ -10,7 +10,7 @@
 #include "SubimageLayout.h"
 #include "FITS.h"
 //#include "ConvexOptimization.h"
-//#include "Metric.h"
+//#include "Metric.h"Información
 #include "ToolBox.h"
 
 #include "Zernike.h"
@@ -18,16 +18,20 @@
 #include <cmath>
 #include "SparseRecovery.h"
 #include "PhaseScreen.h"
-
+#include "Regression.h"
+#include "DataSet.h"
+#include <fstream>
 int main()
 {
   try
   {
     std::cout << "Hello" << std::endl;
     SubimageLayout subimageLayout;
-    //test_minQ2();
-    //test_covarianceMatrix();
-    subimageLayout.computerGeneratedImage();
+
+    subimageLayout.computerGeneratedImage();    
+    
+    //subimageLayout.dataSimulator();
+
   }
   catch (cv::Exception const & e)
   {
@@ -36,4 +40,5 @@ int main()
 
   return 0;
 }
+
 

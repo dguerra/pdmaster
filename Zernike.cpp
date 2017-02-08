@@ -308,6 +308,46 @@ void Zernike::circular_mask(const double& r_c, const int& nph, cv::Mat& c_mask)
  
 }
 
+void Zernike::circular_mask(cv::Mat& c_mask)
+{
+  double r_c(radious_px_);
+  int nph(side_px_);
+  c_mask.create(nph, nph, cv::DataType<double>::type);
+  double* z = (double*)c_mask.data;
+
+  //Circular mask: zero-valued outside the cicle, one-valued inside, 
+  //the edge pixels has values between 0 and 1 depending on how far lies the center of the pixel from the edge
+  int xo=1+nph/2,yo=1+nph/2;
+  double rcs=r_c*r_c,dx=0.5/r_c,dy=0.5/r_c;
+  for(int x=1;x<=nph;++x){
+    double xl=fabs((double)(x-xo))/r_c-dx,xh=fabs((double)(x-xo))/r_c+dx;
+    double xhs=std::pow(xh,2.0);
+    for(int y=1;y<=nph;++y){
+      double yl=fabs((double)(y-yo))/r_c-dy,yh=fabs((double)(y-yo))/r_c+dy;
+      double yhs=std::pow(yh,2.0);
+      double rsl=std::pow(xl,2.0)+std::pow(yl,2.0),rsh=xhs+yhs;
+      int ti=(rsl<rcs)+(rsh<rcs);
+      if(rsl<=1.0)
+      {      // inside pixel
+        if(rsh<1.0)      // full pixel
+        {
+          z[(x-1)*nph + (y-1)] = 1.0;
+        }
+        else
+        {            // partial pixel
+          double x2 = std::sqrt(max(1.0-yhs,(double)0.0));
+          double y3 = std::sqrt(max(1.0-xhs,(double)0.0));
+          double f = (xh>yh)?(yh-yl)*(std::min(xh,std::max(xl,x2))-xl)/(4*dx*dy):
+                           (xh-xl)*(std::min(yh,std::max(yl,y3))-yl)/(4*dx*dy);
+          z[(x-1)*nph + (y-1)] = f;
+        }
+      }
+      else z[(x-1)*nph + (y-1)] = 0.0; // outside pixel
+    }
+  }
+ 
+}
+
 
 cv::Mat Zernike::phaseMapZernike(const unsigned int& j, const unsigned int& sideLength, const double& radiousLength, const bool& unit_rms, const bool& c_mask)
 {

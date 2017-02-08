@@ -44,7 +44,7 @@ all: PDMain
 build: $(OBJS) $(USER_OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: GCC C++ Linker'
-	g++ -o PDMain -L../lib -I../include -Wl,-rpath=../lib $(OBJS) $(USER_OBJS) $(LIBS)
+	g++ -o PDMain -Wl,-rpath,../opencv-3.1.0/build/lib,-rpath,../lib $(OBJS) $(USER_OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -52,7 +52,7 @@ build: $(OBJS) $(USER_OBJS)
 debug: $(OBJS) $(USER_OBJS)
 	@echo 'Building target debug: $@'
 	@echo 'Invoking: GCC C++ Linker'
-	g++ -ggdb3 -o PDMain -L../lib -I../include -Wl,-rpath=../lib $(OBJS) $(USER_OBJS) $(LIBS)
+	g++ -ggdb3 -o PDMain -Wl,-rpath,../opencv-3.1.0/build/lib,-rpath,../lib $(OBJS) $(USER_OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 

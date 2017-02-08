@@ -7,6 +7,8 @@ CPP_SRCS += \
 ../FITS.cpp \
 ../SparseRecovery.cpp \
 ../PhaseScreen.cpp \
+../Regression.cpp \
+../DataSet.cpp \
 ../ImageQualityMetric.cpp \
 ../ConvexOptimization.cpp \
 ../Metric.cpp \
@@ -25,6 +27,8 @@ OBJS += \
 ./src/FITS.o \
 ./src/SparseRecovery.o \
 ./src/PhaseScreen.o \
+./src/Regression.o \
+./src/DataSet.o \
 ./src/ImageQualityMetric.o \
 ./src/ConvexOptimization.o \
 ./src/Metric.o \
@@ -43,6 +47,8 @@ CPP_DEPS += \
 ./src/FITS.d \
 ./src/SparseRecovery.d \
 ./src/PhaseScreen.d \
+./src/Regression.d \
+./src/DataSet.d \
 ./src/ImageQualityMetric.d \
 ./src/ConvexOptimization.d \
 ./src/Metric.d \
@@ -63,6 +69,6 @@ CPP_DEPS += \
 src/%.o: ../%.cpp
 	@echo 'Building file: $<'
 	@echo 'Invoking: GCC C++ Compiler'
-	g++ -ggdb3 -std=c++11 -L../lib -I../include -Wall -c -fmessage-length=0 -MMD -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
+	g++ -ggdb3 -std=c++11 -I../include -I../opencv-3.1.0/include -Wall -c -fmessage-length=0 -MMD -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.d)" -o "$@" "$<" -Wl,-rpath=../lib
 	@echo 'Finished building: $<'
 	@echo ' '

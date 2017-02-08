@@ -47,6 +47,7 @@ class Zernike
   
   //Circular pupil amplitude
   void circular_mask(const double& r_c, const int& nph, cv::Mat& c_mask);
+  void circular_mask(cv::Mat& c_mask);
   /**
    * Returns a phase map given by a single Zernike polynomial
    *

@@ -20,8 +20,6 @@ class SubimageLayout
 public:
   SubimageLayout();
   virtual ~SubimageLayout();
-  // navigateThrough
-  void fromPhaseScreen();
   void dataSimulator();
   void aberrate(const cv::Mat& img, const cv::Mat& aberrationPhase, const double& pupilRadious, const double& sigmaNoise, cv::Mat& aberratedImage);
   cv::Mat atmospheric_zernike_coeffs(const unsigned int& z_max, const double& D, const double& r0);

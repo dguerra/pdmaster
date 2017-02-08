@@ -15,6 +15,7 @@
 #include "ImageQualityMetric.h"
 #include "ToolBox.h"
 #include "PhaseScreen.h"
+#include <fstream>
 //Rename as ImageSimulator o ImageFormation o ImageDispatcher
 
 
@@ -67,100 +68,139 @@ cv::Mat SubimageLayout::atmospheric_zernike_coeffs(const unsigned int& z_max, co
 
 void SubimageLayout::dataSimulator()
 {
-  //Load ground thruth image and normalize
+  
   cv::Mat img;
-  readFITS("../inputs/surfi000.fits", img);
-  img.convertTo(img, cv::DataType<double>::type);
-  cv::normalize(img, img, 0.0, 1.0, CV_MINMAX);
+  //readFITS("../inputs/surfi000.fits", img);
+  img = cv::imread(std::string("../inputs/vray_osl_simplex_noise_10.png"), CV_LOAD_IMAGE_GRAYSCALE);   // Read the file
+
+  img.convertTo(img, CV_64F);   //Convert to float 32 which is the data type used by the convNet
+  cv::normalize(img, img, 0.0, 100.0, CV_MINMAX);     //¿¿?? Normalize before or after aberration
+  
   std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
 
-  //Initialize focused and defocused images
-  cv::Mat d1 = cv::Mat::zeros(img.size(), img.type());
-  cv::Mat d2 = cv::Mat::zeros(img.size(), img.type());
-
-  //Set up optical configuration for this size of image
-  OpticalSetup ts(img.cols);
+  //Number of zernike polinomials used in the simulation: 10
+  //Atmosphere coefficients vary randomly
+  constexpr unsigned int numberOfZrnks(10);
   
+   //The phase diversity coefficients define the different beam path in the optical setup
+  cv::Matx<double, numberOfZrnks, 1> phase_div_0(0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  cv::Matx<double, numberOfZrnks, 1> phase_div_1(0.0, 0.0, 0.0,  2.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  cv::Matx<double, numberOfZrnks, 1> phase_div_2(0.0, 0.0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  std::vector<cv::Mat> phase_div = {cv::Mat(phase_div_0), cv::Mat(phase_div_1), cv::Mat(phase_div_2)};
+  
+  unsigned int tileSize(64);  //Size of subimage
+  //We use the optical configuration parameters to find the radious of the aperture in pixels
+  OpticalSetup ts(tileSize);
+
   //set a value for noise variance
-  double sigma_noise(0.0);
-
-  //Genrate phase screen
-  unsigned int nw = img.cols;   //Size of phase screen in pixels
-  double r0 = 0.2 * (ts.pupilRadiousPixels()/4.2);   //Fred parameter in pixels
-  double L0 = 10.0 * (ts.pupilRadiousPixels()/4.2);   //The outer scale of turbulence in pixels
-  PhaseScreen phaseScreen;
-  //cv::Mat phase = phaseScreen.fractalMethod(nw, r0, L0);
+  double sigma_noise(0.0);    //Add zero noise initially
+  Zernike zrnk(ts.pupilRadiousPixels(), tileSize, numberOfZrnks);
+  cv::Mat c_mask;
+  zrnk.circular_mask(c_mask);
   
-  double z_coeffs_d[] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0, 0.0, 0.4, 0.0, 0.3, 0.0, 0.0};
-  cv::Mat z_coeffs(14, 1, cv::DataType<double>::type, z_coeffs_d);
-  Zernike zrnk;
-  cv::Mat phase = zrnk.phaseMapZernikeSum(img.cols, ts.pupilRadiousPixels(), z_coeffs);
+  cv::theRNG() = cv::RNG( cv::getTickCount() );
+  cv::RNG& rng = cv::theRNG();
   
-  aberrate(img, phase(cv::Rect(cv::Point(0,0),img.size())), ts.pupilRadiousPixels(),  sigma_noise, d1 );
+  const unsigned int stride(1);
+  unsigned int batch_i(1);
+  std::ofstream fout;
   
-  cv::Mat diversityPhase = (ts.k() * 3.141592/(2.0*std::sqrt(3.0))) *  zrnk.phaseMapZernike(4, img.cols, ts.pupilRadiousPixels(), false);
-  aberrate(img, phase(cv::Rect(cv::Point(0,0),img.size())) + diversityPhase, ts.pupilRadiousPixels(), sigma_noise, d2 );
+    //theBeginning:
+  unsigned int countRecord(1);
+  for(;;)  
+  {
+    //Rotate 90
+    cv::transpose(img, img);  
+    cv::flip(img, img,1);
+    for (unsigned int r = 0; r < img.rows; r += stride)
+    {
+      for (unsigned int c = 0; c < img.cols; c += stride)
+      {
+        if( (r + tileSize) <= img.rows && (c + tileSize) <= img.cols)   //Only consider square tiles and discard the rest
+        {
+          //Get ready the file to be written
+          if(!fout.is_open())
+          {
+            std::string filemane = std::string("../data_batch_") + std::to_string(batch_i) + std::string(".bin");
+            fout.open(filemane, std::ios::out | std::ios::binary);
+            if(!fout) {
+              std::cout << "Cannot open file.";
+              return;
+            }
+            countRecord = 1;  //Reset counter to one
+          }
+          
+          std::vector<cv::Mat> v;
+          cv::Matx<double, numberOfZrnks, 1> atmos(0.0, 0.0, 0.0, rng.uniform(-20.0, 20.0), rng.uniform(-20.0, 20.0)
+                                                                , rng.uniform(-20.0, 20.0), rng.uniform(-20.0, 20.0)
+                                                                , rng.uniform(-20.0, 20.0), rng.uniform(-20.0, 20.0)
+                                                                , rng.uniform(-20.0, 20.0) );
+          cv::Mat atmos_;
+          cv::Mat(atmos).convertTo(atmos_, CV_32F);
+          fout.write(reinterpret_cast<char*>(atmos_.data), atmos_.total() * atmos_.elemSize());
+         
+          cv::Range rRange(r, r+tileSize), cRange(c, c+tileSize);
+          for(cv::Mat pd : phase_div)
+          {
+            
+            cv::Mat phase;
+            zrnk.synthesize(cv::Mat(atmos) + pd, phase); 
+            Optics optics(phase, c_mask);  //Characterized optical system
+            cv::Mat otf = optics.otf().clone();
+             
+            cv::Mat psf;
+            cv::idft(otf, psf, cv::DFT_REAL_OUTPUT);
+            fftShift(psf);
+            
+            cv::Mat d_i;   //Data image captured by each detector
+            bool correlation(false), full(false);
+            convolveDFT(img(rRange, cRange), psf, d_i, correlation, full);
+            d_i.convertTo(d_i, CV_32F);
+            //Add noise if needed
+            
+            if(false)
+            {
+              //Visualize
+              cv::Mat otf_[2];
+              cv::split(otf, otf_);
+              cv::magnitude(otf_[0], otf_[1], otf_[0]);
+              cv::normalize(otf_[0], otf_[0], 0.0, 255.0, CV_MINMAX);
+              cv::imwrite("../otf_mag.jpg", otf_[0]);
+              
+              cv::Mat psf_ = psf.clone();
+              //cv::log(psf_, psf_);
+              cv::normalize(psf_, psf_, 0.0, 255.0, CV_MINMAX);
+              cv::imwrite("../psf.jpg", psf_);
+    
+              v.push_back(d_i);
+            }
+            
+            fout.write(reinterpret_cast<char*>(d_i.data), d_i.total() * d_i.elemSize());
+          }
+          
+          //In order BGR
+          //cv::Mat img_color;
+          //cv::merge(v, img_color);
+          //cv::normalize(img_color, img_color, 0.0, 255.0, CV_MINMAX);
+          //cv::imwrite("../img_color.jpg", img_color);
+          if(countRecord == 10000)
+          {
+            fout.close(); 
+            std::cout << "Batch created." << std::endl; 
+            if(batch_i<10) batch_i++;
+            else return;
+          }
+          
+          countRecord++;
+        }
+      }
+    }
+  }
   
-  WavefrontSensor wSensor;
-  std::vector<cv::Mat> d = {d1, d2};
-  
-  NoiseEstimator noiseFocused, noiseDefocused;
-  noiseFocused.meanPowerSpectrum(d1);
-  noiseDefocused.meanPowerSpectrum(d2);
-  
-  //double meanPower = (sigma.val[0]*sigma.val[0])/d1.total();
-
-  //std::vector<double> meanPowerNoise = {0.0, 0.0};
-  cv::Mat object = wSensor.WavefrontSensing(d, (noiseFocused.meanPower()+noiseDefocused.meanPower())/2.0);
+  std::cout << "End of function has been reached." << std::endl;
+  //fout.close();
 }
 
-
-void SubimageLayout::fromPhaseScreen()
-{
-  //Load ground thruth image and normalize
-  cv::Mat img;
-  readFITS("../inputs/surfi000.fits", img);
-  img.convertTo(img, cv::DataType<double>::type);
-  cv::normalize(img, img, 0.0, 1.0, CV_MINMAX);
-  std::cout << "cols: " << img.cols << " x " << "rows: " << img.rows << std::endl;
-
-  //Initialize focused and defocused images
-  cv::Mat d1 = cv::Mat::zeros(img.size(), img.type());
-  cv::Mat d2 = cv::Mat::zeros(img.size(), img.type());
-  
-  //Set up optical configuration for this size of image
-  OpticalSetup ts(img.cols);
-  
-  //set a value for noise variance
-  double sigma_noise(0.0);
-  
-  //load phase screen from disc and applyOpticalAberration
-  cv::Mat pupilPhase;
-  readFITS("../inputs/wavefront0001pupil.fits", pupilPhase);
-  pupilPhase.convertTo(pupilPhase, cv::DataType<double>::type);
-  cv::subtract(pupilPhase, 66417.0, pupilPhase);
-  
-  // specify fx and fy and let the function compute the destination image size.
-  cv::resize(pupilPhase, pupilPhase, cv::Size(), ts.pupilRadiousPixels()/455.0, ts.pupilRadiousPixels()/455.0, cv::INTER_LINEAR);
-  
-  
-  int top  = (int) ((img.rows-pupilPhase.rows)/2.0); int bottom = (img.rows - pupilPhase.rows) - top;
-  int left = (int) ((img.cols-pupilPhase.cols)/2.0); int right  = (img.cols - pupilPhase.cols) - left;
-  cv::copyMakeBorder( pupilPhase, pupilPhase, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(0.0) );
-  
-  std::cout << "pupilPhase.cols: " << pupilPhase.cols << " x " << "pupilPhase.rows: " << pupilPhase.rows << std::endl;
-  aberrate(img, pupilPhase, ts.pupilRadiousPixels(),  sigma_noise, d1 );
-  Zernike zrnk;
-  cv::Mat diversityPhase = (ts.k() * 3.141592/(2.0*std::sqrt(3.0))) *  zrnk.phaseMapZernike(4, img.cols, ts.pupilRadiousPixels(), false);
-  aberrate(img, pupilPhase + diversityPhase, ts.pupilRadiousPixels(), sigma_noise, d2 );
-/*
-  WavefrontSensor wSensor;
-  std::vector<cv::Mat> d = {d1, d2};
-
-  std::vector<double> meanPowerNoise = {0.0, 0.0};
-  cv::Mat object = wSensor.WavefrontSensing(d, meanPowerNoise);
-*/
-}
 
 //Rename as simulation image
 void SubimageLayout::computerGeneratedImage()
@@ -198,7 +238,6 @@ void SubimageLayout::computerGeneratedImage()
   
   //Create at least one phase for one patch
   double data_coeffs[] =   {0, 0, 0,  0.2155518876905822, -0.1944677950837682, 0.03497835759983991, -0.1114719556999538, -0.0089693894577957,
-          
           -0.04710748628638275,  0.1028641408486822, -0.0390145418007589,   0.05894036261075137,  0.0756139441983438, -0.0645236207777915, 
          	-0.01968917879771064, -0.0391565561963278,  0.0198497982483514,  -0.02280286747790469, -0.0564022395673681, -0.0148990812317611};
          
@@ -223,11 +262,27 @@ void SubimageLayout::computerGeneratedImage()
   cv::Mat d2 = cv::Mat::zeros(img.size(), img.type());
   
   double sigma_noise(0.0);
+  cv::Mat c_mask;
+  zrnk.circular_mask(ts.pupilRadiousPixels(), tileSize, c_mask);
   
   for(unsigned int i=0;i<img_v.size(); ++i)
   {
     cv::Mat tile1, tile2;
     std::pair<cv::Range, cv::Range> rng = rng_v.at(i);
+
+    /*
+    bool correlation(false), full(false);
+    
+    Optics optics_1(phase_v.at(i), c_mask);  //Characterized optical system
+    cv::Mat psf1;
+    cv::idft(optics_1.otf(), psf1, cv::DFT_REAL_OUTPUT);
+    convolveDFT(img_v.at(i), psf1, tile1, correlation, full);
+
+    Optics optics_2(phase_v.at(i) + extraZ4, c_mask);  //Characterized optical system
+    cv::Mat psf2;
+    cv::idft(optics_2.otf(), psf2, cv::DFT_REAL_OUTPUT);
+    convolveDFT(img_v.at(i), psf2, tile2, correlation, full);
+    */
     
     aberrate(img_v.at(i), phase_v.at(i), ts.pupilRadiousPixels(),  sigma_noise, tile1 );
     aberrate(img_v.at(i), phase_v.at(i) + extraZ4, ts.pupilRadiousPixels(), sigma_noise, tile2 );
@@ -251,32 +306,23 @@ void SubimageLayout::computerGeneratedImage()
 
 void SubimageLayout::aberrate(const cv::Mat& img, const cv::Mat& aberrationPhase, const double& pupilRadious, const double& sigmaNoise, cv::Mat& aberratedImage)
 {
-
-  cv::Mat planes[] = {img, cv::Mat::zeros(img.size(), cv::DataType<double>::type)};
   cv::Mat complexI;
-  cv::merge(planes, 2, complexI);         // Add to the expanded another plane with zeros
-
-  cv::dft(complexI, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
+  cv::dft(img, complexI, cv::DFT_COMPLEX_OUTPUT + cv::DFT_SCALE);
   fftShift(complexI);
 
   double pupilSideLength = img.cols;
 
-//  cv::Mat diversityPhase = (diversity * 3.141592/(2.0*std::sqrt(3.0))) * Zernike::phaseMapZernike(4, pupilSideLength, pupilRadious, false);
-//  cv::Mat pupilPhase = Zernike::phaseMapZernikeSum(pupilSideLength, pupilRadious, aberationCoeffs);
   cv::Mat c_mask;
   Zernike zrnk;
   zrnk.circular_mask(pupilRadious, pupilSideLength, c_mask);
   Optics OS = Optics(aberrationPhase, c_mask );  //Characterized optical system
-
+  
   cv::Mat otf = OS.otf();
   fftShift(otf);
-
-  cv::mulSpectrums(selectCentralROI(otf, complexI.size()), complexI.mul(complexI.total()), aberratedImage, cv::DFT_COMPLEX_OUTPUT);
+  cv::mulSpectrums(otf, complexI.mul(complexI.total()), aberratedImage, cv::DFT_COMPLEX_OUTPUT);
   
   fftShift(aberratedImage);
   cv::idft(aberratedImage, aberratedImage, cv::DFT_REAL_OUTPUT);
-
-
   //Add noise to the image
   cv::Mat noise(img.size(), cv::DataType<double>::type);
   cv::Scalar sigma(sigmaNoise), m_(0);
